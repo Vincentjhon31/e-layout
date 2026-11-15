@@ -473,6 +473,23 @@ def run_page_checks(site):
           re.search(r'^\s*DirectoryIndex\s+index\.html\s+index\.php\s*$', root_ht, re.M) is not None)
     check('the root .htaccess answers 404 for /private as a second lock',
           re.search(r'^\s*RedirectMatch\s+404\s+\^/private\(/\|\$\)\s*$', root_ht, re.M) is not None)
+    # The old project's files were uploaded with the classic tool and can't be deleted with the
+    # tools at hand, so the root .htaccess hides them; nothing the sites use may be caught.
+    gone = [re.compile(m) for m in re.findall(r'^\s*RedirectMatch\s+404\s+(\S+)\s*$', root_ht, re.M)]
+    leftovers = ['/.superpowers', '/.superpowers/', '/.superpowers/brainstorm/1994-1792592554/content/photo.jpg',
+                 '/alight_motion/', '/alight_motion/603f8847-eebb-455a-be55-9a133f28fac6.jpg', '/tools/',
+                 '/tools/build_layouts.py', '/prompt.md', '/README.md']
+    check('the root .htaccess answers 404 for the old project leftovers',
+          all(any(g.search(p) for g in gone) for p in leftovers),
+          [p for p in leftovers if not any(g.search(p) for g in gone)])
+    in_use = ['/', '/index.html', '/favicon.ico', '/app.html', '/css/app.css', '/css/landing.css', '/js/app.js',
+              '/js/landing.js', '/fonts/barlow-400.woff2', '/fonts/licenses/barlow.txt', '/img/seal-96.png',
+              '/layouts/layouts.js', '/layouts/pio-footer.layout.json', '/landing/landing.js', '/landing/demo/render.js',
+              '/download/', '/download/latest.json', '/download/files/e-layout-1.0.0.apk', '/app/', '/app/main.dart.js',
+              '/app/assets/AssetManifest.bin.json', '/api/', '/api/releases.php', '/api/download.php', '/admin/']
+    check('the root .htaccess 404 rules leave every page and file the sites use alone',
+          not any(g.search(p) for g in gone for p in in_use),
+          [p for p in in_use if any(g.search(p) for g in gone)])
     for rel_path in ['api/.htaccess', 'download/.htaccess', 'private/.htaccess']:
         check(f'{rel_path} exists', os.path.isfile(os.path.join(site, *rel_path.split('/'))))
     demo = subprocess.run([sys.executable, os.path.join(ROOT, 'tool', 'site_copy_demo.py'), '--check'], capture_output=True, text=True)

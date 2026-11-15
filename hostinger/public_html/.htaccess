@@ -13,6 +13,15 @@ DirectoryIndex index.html index.php
 # Second lock: nothing under /private is ever served, even if private/.htaccess is missed.
 RedirectMatch 404 ^/private(/|$)
 
+# Files of the old project that were uploaded together with the classic tool. The tool
+# never uses them, and some (brainstorm pictures, notes) must not be public. Delete them
+# in hPanel's File Manager when you can; until then they answer 404.
+RedirectMatch 404 ^/\.superpowers(/|$)
+RedirectMatch 404 ^/alight_motion(/|$)
+RedirectMatch 404 ^/tools(/|$)
+RedirectMatch 404 ^/prompt\.md$
+RedirectMatch 404 ^/README\.md$
+
 # For the day the classic version is retired, remove the # in front of the next line:
 # RedirectMatch 301 ^/app\.html$ /app/
 
