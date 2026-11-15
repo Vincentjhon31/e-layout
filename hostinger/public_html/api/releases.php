@@ -3,9 +3,10 @@
 //
 // Called ONLY by the release workflow (scripts/publish_release.py), never by
 // the app or a person. It has its own secret, separate from everything else
-// on the hosting account: private/release-upload-secret.txt (one line, at
-// least 32 characters; the same value as the repository's RELEASE_UPLOAD_SECRET).
-// Without that file, uploads are switched off.
+// on the hosting account: private/release-upload-secret.php (<?php return '...'; with a value of at
+// least 32 characters, the same as the repository's RELEASE_UPLOAD_SECRET;
+// the old release-upload-secret.txt is read only as a fallback).
+// Without that file, or without private/.htaccess, uploads are switched off.
 //
 // It can only write inside download/:
 //   download/files/e-layout-X.Y.Z.apk and e-layout-X.Y.Z-setup.exe
@@ -28,14 +29,17 @@ const RELEASE_KEEP_FILES = 3;
 
 function require_release_secret(): void
 {
-    $path = PRIVATE_DIR . '/release-upload-secret.txt';
-    $secret = is_file($path) ? trim((string) file_get_contents($path)) : '';
+    // If private/.htaccess was missed during upload, the secret could be read
+    // from the web: keep uploads off until it is there.
+    if (!is_file(PRIVATE_DIR . '/.htaccess')) {
+        fail('Release uploads are off: private/.htaccess is missing on this server.', 503);
+    }
+    $secret = read_release_secret();
     if (strlen($secret) < 32) {
         fail('Release uploads are not set up on this server.', 503);
     }
     $given = $_SERVER['HTTP_X_RELEASE_SECRET'] ?? '';
     if (!is_string($given) || !hash_equals($secret, $given)) {
-        usleep(500000); // slows down guessing
         fail('Not allowed.', 403);
     }
 }

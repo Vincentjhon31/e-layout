@@ -23,7 +23,7 @@ The workflow needs these in the repository settings (Settings, Secrets and varia
 | `KEYSTORE_PASSWORD` | secret | Its password |
 | `KEY_ALIAS` | secret | The key's name inside it (`upload`) |
 | `KEY_PASSWORD` | secret | The key's password (the same as the store password) |
-| `RELEASE_UPLOAD_SECRET` | secret | A long random value; the same text is in `private/release-upload-secret.txt` on the website. It lets the workflow put files on the download page. |
+| `RELEASE_UPLOAD_SECRET` | secret | A long random value; the same text is in `private/release-upload-secret.php` on the website. It lets the workflow put files on the download page. |
 | `PUBLISH_TO_SITE` | variable | `true` once the website is set up; until then the release still succeeds, with its files on GitHub only |
 
 Make the key and the values once with `python scripts/make_upload_key.py` (it writes `.release/upload-keystore.jks`, `.release/secrets.txt` and `android/key.properties`, none of which is ever committed), then set the secrets with `python scripts/set_github_secrets.py --repo Vincentjhon31/e-layout`. Turn publishing on with `gh variable set PUBLISH_TO_SITE --body true --repo Vincentjhon31/e-layout`.
@@ -38,7 +38,7 @@ Make the key and the values once with `python scripts/make_upload_key.py` (it wr
 | "The tag ... does not match" | Run step 2 again, commit, move the tag. |
 | "Missing Android signing secrets" | Set the secrets (one-time setup). Never let CI sign with another key. |
 | The tree check reports a problem | It names the file and kind (a key, a private photo, an email address); remove it, commit, move the tag. |
-| Publishing fails with 403 | `RELEASE_UPLOAD_SECRET` differs from the website's `private/release-upload-secret.txt`. |
+| Publishing fails with 403 | `RELEASE_UPLOAD_SECRET` differs from the website's `private/release-upload-secret.php`. |
 | Publishing fails with 503 | The website has no upload secret yet (`hostinger/README.md`). |
 | Windows job fails | Android users still get their update; fix and run the Windows job again from the Actions tab. |
 

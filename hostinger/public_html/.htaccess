@@ -6,7 +6,12 @@
 # (This folder's own landing/ holds a separate copy of what the landing page needs.)
 
 Options -Indexes
-DirectoryIndex index.html
+# index.php too: every subfolder inherits this list, so /api/ must find api/index.php
+# (the health check) and a later admin/ page its index.php.
+DirectoryIndex index.html index.php
+
+# Second lock: nothing under /private is ever served, even if private/.htaccess is missed.
+RedirectMatch 404 ^/private(/|$)
 
 # For the day the classic version is retired, remove the # in front of the next line:
 # RedirectMatch 301 ^/app\.html$ /app/

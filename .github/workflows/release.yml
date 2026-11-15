@@ -202,7 +202,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   web:
-    needs: [prepare, android]
+    # After the windows job: both add files to the same GitHub Release, and two
+    # simultaneous uploads sometimes fail on a conflict. Still runs if Windows failed.
+    needs: [prepare, android, windows]
+    if: ${{ always() && needs.android.result == 'success' }}
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.prepare.outputs.version }}

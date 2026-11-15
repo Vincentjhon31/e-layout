@@ -10,8 +10,7 @@ cors();
 
 $downloadDir = download_dir();
 $downloadWritable = is_dir($downloadDir) ? is_writable($downloadDir) : is_writable(dirname($downloadDir));
-$secretFile = PRIVATE_DIR . '/release-upload-secret.txt';
-$releaseUploads = is_file($secretFile) && strlen(trim((string) file_get_contents($secretFile))) >= 32;
+$releaseUploads = is_file(PRIVATE_DIR . '/.htaccess') && strlen(read_release_secret()) >= 32;
 
 /**
  * Tries to download a marker file from private/ over the web, the way a
@@ -25,9 +24,7 @@ function private_folder_protected(): ?bool
     }
     $marker = 'If you can read this from a browser, the private folder is NOT protected.';
     $file = PRIVATE_DIR . '/protected-check.txt';
-    if (!is_file($file)) {
-        @file_put_contents($file, $marker);
-    }
+    @file_put_contents($file, $marker);
     $ch = curl_init(rtrim((string) constant('PRIVATE_PUBLIC_URL'), '/') . '/protected-check.txt');
     curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_TIMEOUT => 8]);
     $body = curl_exec($ch);
@@ -36,14 +33,22 @@ function private_folder_protected(): ?bool
     if ($body === false || $status === 0) {
         return null;
     }
-    return !($status === 200 && strpos((string) $body, $marker) !== false);
+    return $status !== 200; // any 200 answer means a stranger can read the folder
 }
 
-$protected = private_folder_protected();
+// The self-check calls this site's own address, so remember the answer for 5 minutes.
+$cacheFile = PRIVATE_DIR . '/protected-check-result.json';
+$cached = is_file($cacheFile) ? json_decode((string) file_get_contents($cacheFile), true) : null;
+if (is_array($cached) && isset($cached['at']) && time() - (int) $cached['at'] < 300 && array_key_exists('value', $cached)) {
+    $protected = $cached['value'];
+} else {
+    $protected = private_folder_protected();
+    @file_put_contents($cacheFile, json_encode(['at' => time(), 'value' => $protected]));
+}
 $result = [
     'ok' => true,
     'service' => 'e-Layout site API',
-    'php' => PHP_VERSION,
+    'php_8_1_or_newer' => version_compare(PHP_VERSION, '8.1.0', '>='),
     'gd' => extension_loaded('gd'),
     'curl' => extension_loaded('curl'),
     'fileinfo' => extension_loaded('fileinfo'),

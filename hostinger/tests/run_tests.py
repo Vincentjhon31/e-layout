@@ -237,6 +237,9 @@ def run_api_checks(site, download, files_dir):
     # health check must notice and say so (on Hostinger it says true).
     check('health check detects an unprotected private folder',
           health.get('private_protected') is False and health.get('ok') is False and 'warning' in health, b)
+    check('health check does not show the exact PHP version',
+          'php' not in health or health.get('php') in (True, False), b)
+    check('health check says whether PHP is 8.1 or newer', health.get('php_8_1_or_newer') is True, b)
     check('health check tells how big uploads may be', 'max_upload' in health and 'max_post' in health, b)
     s, b, h = raw('GET', f'http://127.0.0.1:{PHP_PORT}/private/index.php')
     check('private/index.php answers 403', s == 403, s)
@@ -244,24 +247,53 @@ def run_api_checks(site, download, files_dir):
     s, b, _ = raw('POST', rel + '?action=publish', b'{}', {'X-Release-Secret': 'x' * 40})
     check('release uploads are off until the secret file exists', s == 503 and 'not set up' in jbody(b).get('error', ''), (s, b))
     secret = 'release-test-secret-' + uuid.uuid4().hex
-    with open(os.path.join(site, 'private', 'release-upload-secret.txt'), 'w') as f:
-        f.write(secret + '\n')
+    php_secret = os.path.join(site, 'private', 'release-upload-secret.php')
+    txt_secret = os.path.join(site, 'private', 'release-upload-secret.txt')
+    htaccess = os.path.join(site, 'private', '.htaccess')
+
+    def write_php_secret(value):
+        with open(php_secret, 'w') as f:
+            f.write("<?php return '" + value + "';" + chr(10))
+
+    write_php_secret(secret)
     auth = {'X-Release-Secret': secret}
     started = time.time()
     s, b, _ = raw('POST', rel + '?action=publish', b'{}', {'X-Release-Secret': 'wrong' * 10})
-    check('a wrong release secret is refused after a short wait', s == 403 and time.time() - started >= 0.4, (s, b))
+    check('a wrong release secret is refused at once (no sleep that ties up a PHP worker)', s == 403 and time.time() - started < 0.4, (s, b))
     s, b, _ = raw('POST', rel + '?action=publish', b'{}')
     check('a missing release secret is refused', s == 403, (s, b))
     s, b, _ = raw('GET', rel)
     check('releases.php only takes POST', s == 404 and jbody(b) == {'error': 'Not found.'}, (s, b))
-    with open(os.path.join(site, 'private', 'release-upload-secret.txt'), 'w') as f:
-        f.write('short\n')
+    write_php_secret('short')
     s, b, _ = raw('POST', rel + '?action=publish', b'{}', {'X-Release-Secret': 'short'})
     check('a secret shorter than 32 characters switches uploads off', s == 503, (s, b))
-    with open(os.path.join(site, 'private', 'release-upload-secret.txt'), 'w') as f:
-        f.write(secret + '\n')
+    write_php_secret(secret)
     s, b, _ = raw('GET', API + '/')
     check('health check reports release uploads on once the secret exists', jbody(b).get('release_uploads') is True, b)
+    s, b, _ = raw('GET', f'http://127.0.0.1:{PHP_PORT}/private/release-upload-secret.php')
+    check('requesting the secret .php file shows no secret', secret not in b.decode('utf-8', 'replace'), (s, b))
+
+    # The old plain-text file still works as a fallback.
+    os.remove(php_secret)
+    with open(txt_secret, 'w') as f:
+        f.write(secret + chr(10))
+    s, b, _ = raw('POST', rel + '?action=publish', b'{}', auth)
+    check('the old .txt secret is still read as a fallback', s != 503 and s != 403, (s, b))
+    os.remove(txt_secret)
+    write_php_secret(secret)
+
+    # Without private/.htaccess the secret could be read from the web: uploads must be off.
+    saved = open(htaccess, 'rb').read()
+    os.remove(htaccess)
+    s, b, _ = raw('POST', rel + '?action=publish', b'{}', auth)
+    check('uploads are off (503) when private/.htaccess is missing, even with the right secret',
+          s == 503 and 'uploads are off' in jbody(b).get('error', ''), (s, b))
+    s, b, _ = raw('GET', API + '/')
+    check('health check reports uploads off when private/.htaccess is missing', jbody(b).get('release_uploads') is False, b)
+    with open(htaccess, 'wb') as f:
+        f.write(saved)
+    s, b, _ = raw('POST', rel + '?action=publish', b'{}', auth)
+    check('uploads work again once private/.htaccess is back', s not in (503, 403), (s, b))
 
     # ---------- chunked upload ----------
     def upload(name, data, chunk=8 * MB, start=0):
@@ -436,6 +468,11 @@ def run_page_checks(site):
     check('landing page never prints an email address', not re.search(r'[\w.+-]+@[\w-]+\.[\w.]+', landing + download))
     htaccess = os.path.join(site, '.htaccess')
     check('the root .htaccess keeps the classic tool', os.path.isfile(htaccess) and '/app.html' in open(htaccess, encoding='utf-8').read())
+    root_ht = open(htaccess, encoding='utf-8').read()
+    check('the root .htaccess lists index.php so /api/ runs api/index.php',
+          re.search(r'^\s*DirectoryIndex\s+index\.html\s+index\.php\s*$', root_ht, re.M) is not None)
+    check('the root .htaccess answers 404 for /private as a second lock',
+          re.search(r'^\s*RedirectMatch\s+404\s+\^/private\(/\|\$\)\s*$', root_ht, re.M) is not None)
     for rel_path in ['api/.htaccess', 'download/.htaccess', 'private/.htaccess']:
         check(f'{rel_path} exists', os.path.isfile(os.path.join(site, *rel_path.split('/'))))
     demo = subprocess.run([sys.executable, os.path.join(ROOT, 'tool', 'site_copy_demo.py'), '--check'], capture_output=True, text=True)

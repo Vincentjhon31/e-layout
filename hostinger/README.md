@@ -52,8 +52,10 @@ The landing page explains how to move layouts from the classic version to e-Layo
    - **`private_protected` must be `true`.** The API tries to open a test file in `private/` the way a stranger would; `true` means it was blocked. `false` means `private/.htaccess` is missing: upload it before anything else.
    - `null`: open **https://pio.bongabong.gov.ph/private/protected-check.txt** yourself. It must show **403 Forbidden**, not text.
    - `download_writable` `false`: set the `download` folder's permissions to **755** (right-click, Permissions).
+   - `php_8_1_or_newer` must be `true` (the exact PHP version is not shown).
    - `release_uploads` is `false` until you do "App downloads" below.
-9. Open **https://pio.bongabong.gov.ph/** and **https://pio.bongabong.gov.ph/download/**. Before the first release the download page says "The first download will appear here soon." Also open **https://pio.bongabong.gov.ph/app.html** to see that the classic tool still works.
+9. After the root `.htaccess` is uploaded, open **https://pio.bongabong.gov.ph/api/** again: it must still show the JSON above (not 403). The root `.htaccess` also answers 404 for everything under `/private` as a second lock.
+10. Open **https://pio.bongabong.gov.ph/** and **https://pio.bongabong.gov.ph/download/**. Before the first release the download page says "The first download will appear here soon." Also open **https://pio.bongabong.gov.ph/app.html** to see that the classic tool still works.
 
 ## Never delete
 
@@ -68,7 +70,7 @@ The landing page explains how to move layouts from the classic version to e-Layo
 `api/releases.php` has its **own secret**, separate from everything else on the hosting account, and can only write inside `download/`. Without the secret file, uploads are switched off.
 
 1. Make a long random secret (at least 32 characters), for example with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
-2. Put it, alone on one line, in a new file **`pio/private/release-upload-secret.txt`**.
+2. Put it in a new file **`pio/private/release-upload-secret.php`** with exactly this content (replace `THE-SECRET`): `<?php return 'THE-SECRET';`. Being a PHP file, a web request to it shows nothing. (An older plain `release-upload-secret.txt` is still read as a fallback, but do not use it for new setups.) Uploads stay **off** (503) while `private/.htaccess` is missing.
 3. Put the **same value** in the GitHub repository: Settings, Secrets and variables, Actions, new repository secret named **`RELEASE_UPLOAD_SECRET`**.
 4. Add the repository **variable** `PUBLISH_TO_SITE` with the value `true` (Settings, Secrets and variables, Actions, Variables). Without it the release workflow only prints a warning and the release still succeeds, with its files on GitHub.
 5. Open `/api/`: `release_uploads` is now `true`.
@@ -101,7 +103,7 @@ The website version of e-Layout is a Flutter web build made with `--base-href /a
 |---|---|
 | `api-config.php is missing` | Step 3: the file must be at `pio/private/api-config.php`. |
 | `"private_protected": false` | `private/.htaccess` was not uploaded (hidden file). Upload it, then check again. |
-| `"release_uploads": false` | `private/release-upload-secret.txt` is missing or shorter than 32 characters. |
+| `"release_uploads": false` | `private/release-upload-secret.php` is missing or shorter than 32 characters, or `private/.htaccess` is missing. |
 | The release fails at "Publish" with 503 | Same: the secret file is missing or too short. |
 | ... with 403 | The GitHub secret `RELEASE_UPLOAD_SECRET` does not match the file on the server. |
 | ... with 409 "does not match its size and checksum" | The upload was cut off. Run the release's publish step again. |

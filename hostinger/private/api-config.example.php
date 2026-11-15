@@ -4,7 +4,7 @@
 // On Hostinger, copy this file to   private/api-config.php   (same folder),
 // then check the web addresses below match your site. Nothing in here is
 // secret. The release upload secret is NOT in this file: it is the one line in
-// private/release-upload-secret.txt (see README.md, "App downloads").
+// private/release-upload-secret.php (see README.md, "App downloads").
 //
 // Layout (the subdomain's own folder, "pio"):
 //   pio/

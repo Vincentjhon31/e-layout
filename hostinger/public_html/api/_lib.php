@@ -111,3 +111,19 @@ function parse_file_name(string $name): array
     }
     return [$m[1], $m[2] === '.apk' ? 'android' : 'windows'];
 }
+
+/**
+ * The upload secret: private/release-upload-secret.php ("<?php return '...';",
+ * so a web request shows nothing), or the older private/release-upload-secret.txt
+ * as a fallback. '' when there is none.
+ */
+function read_release_secret(): string
+{
+    $php = PRIVATE_DIR . '/release-upload-secret.php';
+    if (is_file($php)) {
+        $value = (static fn () => include $php)();
+        return is_string($value) ? trim($value) : '';
+    }
+    $txt = PRIVATE_DIR . '/release-upload-secret.txt';
+    return is_file($txt) ? trim((string) file_get_contents($txt)) : '';
+}

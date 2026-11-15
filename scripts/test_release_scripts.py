@@ -152,7 +152,7 @@ class PublishTest(unittest.TestCase):
         config = (src / 'private' / 'api-config.example.php').read_text(encoding='utf-8')
         config = config.replace('https://pio.bongabong.gov.ph/api', 'http://127.0.0.1:%d/api' % PORT)
         (cls.site / 'private' / 'api-config.php').write_text(config, encoding='utf-8')
-        (cls.site / 'private' / 'release-upload-secret.txt').write_text(cls.secret + '\n', encoding='utf-8')
+        (cls.site / 'private' / 'release-upload-secret.php').write_text("<?php return '" + cls.secret + "';" + chr(10), encoding='utf-8')
         cls.server = subprocess.Popen(
             ['php', '-S', '127.0.0.1:%d' % PORT, '-t', str(cls.site), '-d', 'post_max_size=13M',
              '-d', 'upload_max_filesize=12M', '-d', 'memory_limit=256M'],
