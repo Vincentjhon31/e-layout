@@ -671,6 +671,10 @@ void main() {
       await tester.pumpAndSettle();
       await tapTile(tester, 'Fit');
       await tester.pumpAndSettle();
+      // Let the "Saving" to "All changes saved" cross-fade finish first.
+      await tester.runAsync(c.flushSave);
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
       await shot(tester, 'picture_fit');
     });
 

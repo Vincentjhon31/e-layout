@@ -89,7 +89,13 @@ class PhotoExporter {
       final codec = await desc.instantiateCodec();
       final frame = await codec.getNextFrame();
       src = frame.image;
-      final clamped = src.width * src.height < desc.width * desc.height;
+      var clamped = false;
+      try {
+        clamped = src.width * src.height < desc.width * desc.height;
+      } on UnsupportedError {
+        // The website's engine cannot report the file's own size; its browser
+        // decodes the picture at full size, so there is nothing to compare.
+      }
       codec.dispose();
       desc.dispose();
       if (clamped || forcePixelPath) {

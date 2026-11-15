@@ -116,6 +116,12 @@ abstract final class AppText {
 /// Spacing and shapes shared by every screen.
 abstract final class AppMetrics {
   static const double gutter = 16;
+
+  /// Wider windows centre their content at this width.
+  static const double contentMaxWidth = 1180;
+
+  /// Sheets and dialogs are never wider than this.
+  static const double sheetMaxWidth = 560;
   static const double cardRadius = 12;
   static const double sheetRadius = 14;
   static const double buttonHeight = 50;

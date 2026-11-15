@@ -15,6 +15,7 @@ import '../../ui/widgets/toast.dart';
 import 'add_sheets.dart';
 import 'editor_canvas.dart';
 import 'editor_controller.dart';
+import 'editor_shortcuts.dart';
 import 'layers_sheet.dart';
 import 'layout_settings_sheet.dart';
 import 'panels/panels.dart';
@@ -170,7 +171,9 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
         backgroundColor: colors.page,
         child: ListenableBuilder(
           listenable: c,
-          builder: (context, _) => Column(
+          builder: (context, _) => EditorShortcuts(
+            controller: c,
+            child: Column(
             children: [
               _TopBar(controller: c, onDone: _done, onRename: _rename, onMenu: _menu),
               Expanded(
@@ -206,6 +209,7 @@ class _EditorScreenState extends State<EditorScreen> with WidgetsBindingObserver
               else
                 _ToolStrip(controller: c, picker: widget.picker, onTool: (t) => setState(() => _tool = t)),
             ],
+          ),
           ),
         ),
       ),

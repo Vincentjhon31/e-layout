@@ -1,9 +1,16 @@
+import 'dart:math' as math;
+
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../ui/app_theme.dart';
 import '../../ui/previews.dart';
 import '../../ui/widgets/pressable.dart';
 import 'home_controller.dart';
+
+/// Columns for a grid [width] points wide: three on a phone, more as cells of
+/// about 180 points fit on a wide window.
+int gridColumns(double width) => math.max(3, (width + 8) ~/ 188);
 
 /// Three columns of live previews. The first cell always adds photos.
 class PhotoGrid extends StatelessWidget {
@@ -28,9 +35,9 @@ class PhotoGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: AppMetrics.gutter),
-      sliver: SliverGrid(
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
+      sliver: SliverLayoutBuilder(builder: (context, constraints) => SliverGrid(
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: gridColumns(constraints.crossAxisExtent),
           mainAxisSpacing: 8,
           crossAxisSpacing: 8,
         ),
@@ -47,7 +54,7 @@ class PhotoGrid extends StatelessWidget {
             onRemove: enabled ? () => onRemove(p) : null,
           );
         }, childCount: photos.length + 1),
-      ),
+      )),
     );
   }
 }
@@ -207,10 +214,12 @@ class EmptyPhotos extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
+    // A mouse on Windows and the website, and photos can be dropped there.
+    final computer = kIsWeb || defaultTargetPlatform == TargetPlatform.windows;
     return Pressable(
       onPressed: onTap,
       pressedOpacity: 0.7,
-      semanticLabel: 'Tap to add photos',
+      semanticLabel: computer ? 'Click to add photos' : 'Tap to add photos',
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
         decoration: BoxDecoration(
@@ -234,12 +243,14 @@ class EmptyPhotos extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              'Tap to add photos',
+              computer ? 'Click to add photos' : 'Tap to add photos',
               style: AppText.title.copyWith(color: c.text),
             ),
             const SizedBox(height: 6),
             Text(
-              'Every photo keeps its full resolution.',
+              computer
+                  ? 'Every photo keeps its full resolution. You can also drop photos or a folder here.'
+                  : 'Every photo keeps its full resolution.',
               textAlign: TextAlign.center,
               style: AppText.subhead.copyWith(color: c.secondary),
             ),

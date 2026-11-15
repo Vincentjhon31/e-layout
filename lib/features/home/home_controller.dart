@@ -219,6 +219,18 @@ class HomeController extends ChangeNotifier {
   /// "Add a folder" (Windows): every photo in a folder and its subfolders.
   Future<void> addFolder() async => addPhotos(await picker.pickFolder());
 
+  /// Files dropped on Home (Windows and the website). On the layout row every
+  /// file is a layout or a picture to import; elsewhere layout files are
+  /// imported and the pictures are added as photos.
+  Future<void> handleDrop(List<PickedPhoto> files, {bool onLayouts = false}) async {
+    if (files.isEmpty) return;
+    if (onLayouts) return importFiles(files);
+    final layoutFiles = [for (final f in files) if (isLayoutFileName(f.name)) f];
+    final photoFiles = [for (final f in files) if (!isLayoutFileName(f.name)) f];
+    if (layoutFiles.isNotEmpty) await importFiles(layoutFiles);
+    if (photoFiles.isNotEmpty) await addPhotos(photoFiles);
+  }
+
   Future<void> addPhotos(List<PickedPhoto> picked) async {
     final known = {for (final p in photos) p.source.key};
     final fresh = <PickedPhoto>[];

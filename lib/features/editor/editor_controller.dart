@@ -529,7 +529,8 @@ class EditorController extends ChangeNotifier {
   double get dragDelta => _drag?.delta ?? 0;
 
   /// A finger went down at [p] (design units): grab a handle or a piece.
-  DownTarget beginDrag(ui.Offset p) {
+  /// With [additive] (Shift held on a computer) the piece is added to the selection, like picking.
+  DownTarget beginDrag(ui.Offset p, {bool additive = false}) {
     _drag = null;
     final before = codec.snapshot(doc);
     final hd = handleAt(handles(), p, zoom);
@@ -559,7 +560,7 @@ class EditorController extends ChangeNotifier {
     if (el == null) return DownTarget.nothing;
     final inSel = sel.contains(el.id);
     String? untoggle;
-    if (picking) {
+    if (picking || additive) {
       if (inSel) {
         untoggle = el.id;
       } else {
@@ -573,7 +574,7 @@ class EditorController extends ChangeNotifier {
       _drag = _Drag(DragKind.move, p, before)
         ..items = startOf(list)
         ..untoggle = untoggle
-        ..drill = !picking && inSel && list.length > 1 ? el.id : null;
+        ..drill = !picking && !additive && inSel && list.length > 1 ? el.id : null;
     }
     return DownTarget.piece;
   }
@@ -1036,6 +1037,35 @@ class EditorController extends ChangeNotifier {
     ops.cleanGroups(doc, fh);
     for (final g in gids.toSet()) {
       if (g != null && doc.groups.containsKey(g)) ops.groupPin(doc, g, fh);
+    }
+  }
+
+  /// Ctrl+A: every piece that is shown and not locked.
+  void selectAll() {
+    select([
+      for (final e in doc.elements)
+        if (e.visible && !e.locked) e.id,
+    ]);
+  }
+
+  /// Arrow keys: moves the selection [dx], [dy] design units, one undo step per run of nudges.
+  void nudge(double dx, double dy) {
+    final list = selection;
+    if (list.isEmpty || list.any((e) => e.locked)) return;
+    change(() {
+      moveItems(startOf(list), dx, dy);
+      repin(list);
+    }, 'nudge:${sel.join(',')}');
+  }
+
+  /// Esc: out of one piece of a group to the whole group, then to nothing.
+  void escape() {
+    if (picking) stopPicking();
+    final one = single;
+    if (one != null && one.group != null) {
+      select([for (final m in ops.membersOf(doc, one.group!)) m.id]);
+    } else if (sel.isNotEmpty) {
+      select(const []);
     }
   }
 

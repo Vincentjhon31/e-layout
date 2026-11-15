@@ -11,6 +11,7 @@ import '../../ui/widgets/sheet_scaffold.dart';
 import '../about/update_controller.dart';
 import '../about/whats_new.dart';
 import 'home_controller.dart';
+import 'home_drop.dart';
 import 'layout_strip.dart';
 import 'options_sheet.dart';
 import 'photo_grid.dart';
@@ -45,6 +46,13 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   Timer? _updateTimer;
+  final GlobalKey _layoutRowKey = GlobalKey();
+
+  Rect? _layoutRowRect() {
+    final box = _layoutRowKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.attached) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
 
   @override
   void initState() {
@@ -72,17 +80,28 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     return CupertinoPageScaffold(
-      child: ListenableBuilder(
+      child: HomeDropTarget(
+        controller: controller,
+        layoutRowRect: _layoutRowRect,
+        child: ListenableBuilder(
         listenable: Listenable.merge([controller, ?widget.updates]),
         builder: (context, _) => Column(
           children: [
-            Expanded(child: _Body(controller: controller, actions: widget.actions, updates: widget.updates)),
+            Expanded(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: AppMetrics.contentMaxWidth),
+                  child: _Body(controller: controller, actions: widget.actions, updates: widget.updates, layoutRowKey: _layoutRowKey),
+                ),
+              ),
+            ),
             SaveBar(
               controller: controller,
               onOptions: () => showAppSheet<void>(context, (_) => OptionsSheet(controller: controller)),
             ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -101,7 +120,8 @@ Future<void> addPhotosFlow(BuildContext context, HomeController controller) {
 }
 
 class _Body extends StatelessWidget {
-  const _Body({required this.controller, required this.actions, this.updates});
+  const _Body({required this.controller, required this.actions, this.updates, this.layoutRowKey});
+  final Key? layoutRowKey;
   final HomeController controller;
   final HomeActions actions;
   final UpdateController? updates;
@@ -153,6 +173,7 @@ class _Body extends StatelessWidget {
           ),
         SliverToBoxAdapter(child: _SectionTitle(title: 'Layout')),
         SliverToBoxAdapter(
+          key: layoutRowKey,
           child: controller.ready
               ? IgnorePointer(
                   ignoring: saving,

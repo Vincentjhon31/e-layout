@@ -30,6 +30,19 @@ The Windows installer is made from the Windows build with Inno Setup 6:
 
 The result is `installer_output/e-layout-1.0.0-setup.exe`. In Git Bash put `MSYS_NO_PATHCONV=1` in front of the web build and ISCC commands, or Git Bash rewrites their `/` options.
 
+### Windows app and website version
+
+- **Windows:** `flutter build windows --release` makes `build/windows/x64/runner/Release/` (run `pio_photo_layout.exe`). The window opens at 1280x800 (smallest 900x620). "Save photos" asks for a folder and never overwrites a file in it (`name (2).jpg`); "Add a folder" adds every photo in a folder and its subfolders. Photos or a folder can be dropped on the window, and a layout file or a picture dropped on the layout row becomes a layout. Editor keys: arrows nudge (Shift for 10), Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo and redo, Delete removes, Ctrl+D duplicates, Ctrl+A selects all, Ctrl+G / Ctrl+Shift+G group and ungroup, Esc steps out of the selection, Shift+click adds to the selection, Ctrl+scroll zooms and scroll pans.
+- **Website:** `flutter build web --release --base-href /app/` (the plain JavaScript build, which is also what the release workflow builds; the `--wasm` build was not tried) makes `build/web/`, which the site serves at `/app/`. Several photos are saved as one ZIP, one photo downloads directly, and layouts and added fonts are kept in the browser's IndexedDB. To look at it locally, copy `build/web` to a folder named `app` inside a folder you serve (`python -m http.server 8765 --directory <that folder>`) and open `http://localhost:8765/app/`.
+- **Self-test of the website's storage and saving speed:** `tool/web_selftest/` is a small page, not part of the app. Build and run it (needs Chrome or Edge):
+
+  ```
+  flutter build web --release --target tool/web_selftest/main.dart --output build/selftest --base-href /selftest/
+  python tool/web_selftest/run.py
+  ```
+
+  The first browser run saves a layout and a font in IndexedDB and times one 4000x3000 photo with the PIO footer; a second run of a new browser process with the same profile folder must read both back. On the development computer one photo took about 3.4 seconds. (`flutter test --platform chrome` does not start here, which is why this is a page.)
+
 A release APK is signed with the upload key named in `android/key.properties` (see `RELEASE_GUIDE.md`); without that file the debug key is used, and such an APK cannot be updated by a release.
 
 The app icon is drawn by `python tool/make_icon.py` (needs Pillow), which also writes every Android, Windows and web icon.

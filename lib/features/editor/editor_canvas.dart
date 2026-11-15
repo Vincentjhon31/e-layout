@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/model/layout_doc.dart';
@@ -105,7 +106,7 @@ class EditorCanvasState extends State<EditorCanvas> {
       _downAt = local;
       _moved = false;
       final p = toDesign(local);
-      _target = c.beginDrag(p);
+      _target = c.beginDrag(p, additive: HardwareKeyboard.instance.isShiftPressed);
       if (_target == DownTarget.nothing) {
         _mode = _Mode.pan;
         _downEl = null;
@@ -207,6 +208,25 @@ class EditorCanvasState extends State<EditorCanvas> {
     _lastTapTime = now;
   }
 
+  /// Mouse wheel: Ctrl zooms around the pointer, otherwise it pans.
+  void _scroll(PointerSignalEvent e) {
+    if (e is! PointerScrollEvent) return;
+    final kb = HardwareKeyboard.instance;
+    final delta = e.scrollDelta;
+    if (kb.isControlPressed || kb.isMetaPressed) {
+      final local = _local(e.position);
+      final design = toDesign(local);
+      setState(() {
+        _userZoom = (_userZoom * math.exp(-delta.dy / 300)).clamp(1.0, 8.0);
+        _pan = Offset.zero;
+        _pan = local - toLocalPoint(design);
+      });
+      c.zoom = scale;
+    } else {
+      setState(() => _pan -= kb.isShiftPressed && delta.dx == 0 ? Offset(delta.dy, 0) : delta);
+    }
+  }
+
   void _cancel(PointerCancelEvent e) {
     _pointers.remove(e.pointer);
     _longPress?.cancel();
@@ -227,6 +247,7 @@ class EditorCanvasState extends State<EditorCanvas> {
           onPointerMove: _move,
           onPointerUp: _up,
           onPointerCancel: _cancel,
+          onPointerSignal: _scroll,
           child: ListenableBuilder(
             listenable: c,
             builder: (context, _) {

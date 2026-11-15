@@ -32,9 +32,15 @@ class SaveBar extends StatelessWidget {
             AppMetrics.gutter,
             0,
           ),
-          child: job != null
-              ? _Progress(job: job, onCancel: controller.cancelSave)
-              : _Idle(controller, onOptions),
+          child: Center(
+            heightFactor: 1,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: AppMetrics.contentMaxWidth - 2 * AppMetrics.gutter),
+              child: job != null
+                  ? _Progress(job: job, onCancel: controller.cancelSave)
+                  : _Idle(controller, onOptions),
+            ),
+          ),
         ),
       ),
     );

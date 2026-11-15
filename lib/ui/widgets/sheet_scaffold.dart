@@ -99,9 +99,18 @@ class SheetScaffold extends StatelessWidget {
 Future<T?> showAppSheet<T>(BuildContext context, WidgetBuilder builder) {
   return showCupertinoModalPopup<T>(
     context: context,
-    builder: (ctx) => Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
-      child: builder(ctx),
+    builder: (ctx) => Align(
+      alignment: Alignment.bottomCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppMetrics.sheetMaxWidth),
+        child: SizedBox(
+          width: double.infinity,
+          child: Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
+            child: builder(ctx),
+          ),
+        ),
+      ),
     ),
   );
 }
