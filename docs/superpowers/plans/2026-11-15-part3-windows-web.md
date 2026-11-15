@@ -1,0 +1,87 @@
+# PIO Photo Layout: Part 3, Windows app and website
+
+> **For agentic workers:** work through the tasks in order. Steps use checkbox (`- [ ]`) syntax. Tick a box only after you have verified it yourself, and keep the **Handoff notes** at the bottom current after every task: another session resumes from them.
+
+**Goal:** The same Flutter code that makes the Android app (Parts 1 and 2, see `2026-11-14-flutter-mobile-app.md` and `2026-11-15-part2-app.md` in this folder, especially their Handoff notes) also runs as a Windows desktop app and as a website, with each platform saving photos the way people expect there.
+
+**Why:** the owner's request: "make the app to a mobile application, windows app, and also a website ... from a single codebase", mobile first. The phone app is done; this is the rest.
+
+**Spec and reference:** the web app in the parent folder (`../README.md`, `../js/app.js`) already solves desktop saving: "Download ZIP" and "Save to folder", never overwriting a file (`writeToFolder`), folder drops, the `_PIO` suffix, ZIP limit 4 GB. Port that behaviour; reuse its wording.
+
+## Global Constraints
+
+- Work only inside `C:\Windows_Applications\REA_Projects\Re_Canva\pio_photo_layout\`. Read the parent folder freely; never modify it. Never deploy or upload anything.
+- No git commands. No system-wide installs; do not change Flutter, Visual Studio, the Android SDK or system settings. Do not shut down, restart or log off the computer.
+- Free RAM is under 1 GB: one `flutter`, Gradle or MSBuild command at a time, with generous timeouts; run long builds with `run_in_background` and wait for the notification if a long foreground command is refused.
+- The Android app must keep working: `flutter analyze` "No issues found!", `flutter test` "All tests passed!" at the end of every task, and the phone code path unchanged unless a task says so.
+- `dart:io` only in files named `*_io.dart`; web-only code (`package:web`, `dart:js_interop`) only in files named `*_web.dart`; choose with conditional imports as `lib/core/store/layout_store.dart` already does. Platform choice at run time (Windows vs Android) uses `defaultTargetPlatform`, never `dart:io` `Platform` outside `*_io.dart`.
+- Add packages with `flutter pub add`, and read a package's source in the pub cache before using its API.
+- Screens: when a screen changes, update or add goldens and open them with the Read tool before ticking (wide goldens at 1280x800, device pixel ratio 1).
+- Never put real people's photos in tests or goldens.
+
+### Budget rule (unattended run; do not wait or sleep)
+
+Read `C:\Windows_Applications\REA_Projects\Re_Canva\.claude\usage-latest.json` before each task and about every 10 tool calls. When `rate_limits.five_hour.used_percentage` is **85 or more** or `rate_limits.seven_day.used_percentage` is **76 or more**: start nothing new, leave the project analyzing cleanly, update this file, and return your final report. Do not try to wait for a reset.
+
+## Decisions (Claude's calls; the owner has not seen them)
+
+- **Windows saving:** "Save N photos" asks for a folder each time (`FilePicker.getDirectoryPath`), then writes every photo there without overwriting (`name (2).jpg`, port of `writeToFolder`). Message: "Saved 12 photos to <folder name> (48.2 MB)." The phone's "Share" button becomes "Show in folder" (opens Explorer on that folder with `explorer.exe /select,` or the folder path through `Process.start` in an `_io` file). Saving one photo from the viewer and "Save layout as PNG" ask for a file name with `FilePicker.saveFile`. Sharing a layout file asks where to save it the same way.
+- **Website saving:** "Save N photos" builds one ZIP in memory with `package:archive` (`ZipEncoder`, stored without compression since JPEGs do not shrink) named `PIO-photos-<yyyy-mm-dd>.zip` and downloads it; above 4 GB say the web app's line about saving in smaller groups. One photo, a layout PNG and a layout file download directly. "Share" is hidden on the website.
+- **Website storage:** layouts and added fonts must survive a reload: store them in the browser's IndexedDB (same idea as the web app's `js/store.js`) behind the existing `LayoutStore` and `FontStore` interfaces, as `*_web.dart` implementations. Settings already use `shared_preferences`, which works on the web.
+- **Photo picking:** phone unchanged (`image_picker`). Windows: `FilePicker.pickFiles(allowMultiple: true, type: FileType.image)` plus a new "Add a folder" action (`getDirectoryPath`, then every image file in it and its subfolders, sorted by name as `addFiles` does). Website: `image_picker` `pickMultiImage` (its web files read bytes lazily, so 40 big photos are not all held in memory at once); check that in its web source.
+- **Drag and drop (Windows and website):** dropping photos or a folder anywhere on Home adds them; dropping a `.layout.json` or a PNG on the layout row imports it. Use the `desktop_drop` package if its source shows it supports both Windows and web; otherwise do Windows only and note it.
+- **Wide windows:** no new design, only adaptation. Home's photo grid uses as many columns as fit cells about 180 wide; content wider than 900 is centred with side margins; sheets and dialogs are at most 560 wide and centred. The editor keeps its layout (canvas in the middle, strip at the bottom); on wide windows the strip's tiles are centred instead of starting at the left. Windows opens at 1280x800, minimum 900x620, title "Photo Layout" (`windows/runner/main.cpp` and `windows/runner/Runner.rc`), with the app icon from `tool/icon_1024.png` converted to `windows/runner/resources/app_icon.ico`.
+- **Mouse and keyboard in the editor (Windows and website):** Ctrl+scroll zooms around the pointer, scroll pans, Ctrl+Z / Ctrl+Y (and Ctrl+Shift+Z) undo and redo, Delete or Backspace removes the selection, arrow keys nudge by 1 and Shift+arrow by 10, Ctrl+D duplicates, Ctrl+A selects all unlocked visible pieces, Ctrl+G groups and Ctrl+Shift+G ungroups, Esc steps out of the selection. Shift+click adds to the selection (as long-press then tap does on the phone). Port the rules from `../js/editor.js` `onKey`.
+- **Website tab title and icon:** title "Photo Layout", description "Puts an office layout on a batch of photos at full resolution.", favicon and manifest icons from `tool/icon_1024.png`, theme colour `#1A6FB3`.
+
+## Tasks
+
+### Task 18: Platform layer for Windows and the website
+
+**Files:** `lib/platform/` (split each service into a shared abstract file plus `_io`/`_web` or per-platform classes as needed: `photo_picker`, `gallery_saver` → rename the abstraction's message wording only if needed, `file_sharer`, `temp_files`), new `lib/platform/file_output.dart` (save-one-file, ZIP download, show-in-folder), `lib/core/store/layout_store_web.dart`, `font_store_web.dart`, `lib/main.dart` (choose the services per platform), the home controller's save flow where Windows/web need the folder or ZIP step, tests.
+
+- [x] **Step 1: tests first.** With fakes and a temp directory: the folder saver writes `a_PIO.jpg`, `b_PIO.jpg`, `b_PIO (2).jpg` and, when `a_PIO.jpg` already exists in the folder, writes `a_PIO (2).jpg` instead (never overwrites); "Add a folder" on a temp tree with `x.jpg`, `sub/y.png`, `notes.txt` adds two photos in name order; the ZIP builder produces an archive that `package:archive` reads back with the right names and bytes and stored (not deflated) entries; the save flow on a "desktop" configuration produces the message "Saved 3 photos to <folder> (<size>)."; the web stores round-trip through an in-memory IndexedDB stand-in if the chosen package offers one (otherwise test the serialisation they share with the io stores and say so).
+- [x] **Step 2:** Implement. `flutter analyze` and `flutter test` clean. Then `flutter build apk --release` still succeeds (do not copy it anywhere).
+
+### Task 19: Windows app
+
+**Files:** `windows/runner/*`, responsive changes in `lib/features/home/`, `lib/features/editor/`, `lib/ui/widgets/sheet_scaffold.dart` and dialogs, keyboard handling in the editor, drag and drop, goldens at 1280x800.
+
+- [ ] **Step 1: tests first:** the photo grid shows 6 columns at 1280 wide and 3 at 390; a sheet is 560 wide in a 1280-wide window; each editor shortcut in the Decisions list does its job through the controller (send key events with `tester.sendKeyEvent`); Ctrl+scroll changes the zoom.
+- [ ] **Step 2:** Implement, including window size, title and icon.
+- [ ] **Step 3:** Goldens at 1280x800: Home with 12 generated photos, the editor with a piece selected, the Options sheet. Open them and fix what looks stretched, lost or awkward on a wide screen.
+- [ ] **Step 4:** `flutter build windows --release` (allow 15 minutes; run in the background if needed). Then run `build\windows\x64\runner\Release\pio_photo_layout.exe` in the background for 20 seconds, take a screenshot of its window (PowerShell with `System.Drawing` copying the screen region of the window, or the whole screen), stop the process, and open the screenshot. Copy the `Release` folder to `dist/windows/` and zip it as `dist/photo-layout-windows-<date>.zip`.
+
+### Task 20: Website
+
+**Files:** `web/index.html`, `web/manifest.json`, `web/icons/*`, `web/favicon.png`, anything in `lib` the web build needs.
+
+- [ ] **Step 1:** `flutter build web --release` (and, if it succeeds quickly, also try `--wasm`; keep the faster-loading one and say which). Copy `build/web` to `dist/web/`.
+- [ ] **Step 2:** Serve `dist/web` locally (`python -m http.server 8765 --directory dist/web` in the background), open it in headless Chrome (`--headless=new --window-size=1280,800 --virtual-time-budget=15000 --screenshot=...`), look at the screenshot, and fix anything broken (blank page, missing fonts, layout issues). Stop the server afterwards.
+- [ ] **Step 3:** Measure saving speed on the website once: in a small test page or a Dart test compiled for Chrome (`flutter test --platform chrome` on one test that encodes a generated 4000x3000 photo with the PIO footer) record how long one photo takes. If it is over 15 seconds, say so plainly in the Handoff notes; do not start a rewrite.
+- [ ] **Step 4:** Update `README.md` with how to run and build for Windows and the web, and where `dist/` puts each.
+
+## Review Focus
+
+1. Saving to a folder must never overwrite an existing file, including two photos with the same name from different subfolders. Task 18.
+2. A batch larger than memory allows on the website must fail with a readable message, not a frozen tab. Task 18 (stop adding to the ZIP and say how many were saved when an allocation fails).
+3. Keyboard shortcuts must not fire while a text field has focus (renaming a layer, editing words). Task 19.
+4. The phone app must not change: no desktop-only widget or package may break the Android build. Tasks 18 and 19.
+5. A layout made on the website must still open after a reload. Task 18.
+
+## Handoff notes
+
+- 2026-11-15 (unattended run, stopped at once): five-hour usage was 87% (limit 85) when I read the budget file after starting, seven-day 70%. I changed no code and ticked nothing. I started `flutter analyze` and stopped it before it finished, so the tree state is unverified by me. Next step: run `flutter analyze` and the full `flutter test` once, then begin Task 18 Step 1 (tests first).
+
+- 2026-11-15 13:20 (+08:00): Part 3 plan written. Nothing of Part 3 is built yet. Android APKs in `dist/`: universal `photo-layout-2026-11-15.apk` (54.3 MB), `-arm64` (19.9 MB) and `-arm32` (17.9 MB), all from the same code, built with `--split-per-abi` for the two small ones.
+
+- 2026-11-15 (unattended run, stopped on the seven-day budget: 77% read, limit 78): **Task 18 done and verified, Tasks 19 and 20 not started.** `flutter analyze` No issues found; `flutter test` All tests passed (225, 14 of them new in `test/platform/desktop_platform_test.dart`); `flutter build apk --release` worked (54.3 MB, 134 s, not copied anywhere).
+  - Interfaces: `GallerySaver` (now `extends`, not `implements`, so new members have defaults) gained `beginBatch(count)` (Windows asks for the folder here; false = cancelled, nothing starts), `endBatch(keep:)`, `resultLine`, `cancelledLine`, `savedOneLine`, and `saveImage` now returns the written path (or null). New exceptions `SaveCancelledException`, `SaveStoppedException(message)`. `FileSharer` gained `buttonLabel` (null hides the button), `needsCopies` (false on Windows and web), `exportFile(name, bytes)` (save dialog or download; used for layout files). `PhotoPicker` gained `canPickFolder` and `pickFolder()`. `HomeController` gained `addFolder()`, `isMemoryFailure`; `saveAll` stops cleanly on `SaveStoppedException` or a memory failure ("... N photos were not saved.") and still downloads what fitted; `saveOne` returns null when the dialog is cancelled; `shareOne` on Windows saves then opens Explorer.
+  - New files: `lib/platform/{zip_writer,zip_saver,folder_saver_io,desktop_photo_picker_io,platform_services,platform_services_io,platform_services_web,device_noun}.dart`, `lib/core/store/{idb_web,layout_store_web,font_store_web}.dart` (IndexedDB through `package:web`; the conditional imports in `layout_store.dart` and `font_store.dart` pick them with `dart.library.js_interop`). `lib/main.dart` now uses `createPlatformServices()` (phone, Windows via `defaultTargetPlatform`, or web) and sets `deviceNoun` ("phone" or "computer", used in the few messages that said "this phone").
+  - ZIP: own writer (`ZipWriter`), stored entries, keeps the photo bytes uncopied and hands the browser the pieces (`Blob` joins them); limit 4 GB minus 1 MB with the web app's wording. `FolderSaver.writeUnique` uses an exclusive create, so nothing is ever overwritten (tested: existing `a_PIO.jpg` gives `a_PIO (2).jpg`; a later photo wanting a taken bumped name is bumped again).
+  - Windows folder dialog `FilePicker.getDirectoryPath`; file save dialog `FilePicker.saveFile` (the Windows implementation writes the bytes itself, read in `windows_file_picker-2.0.2`). `desktop_drop` 0.8.0 supports Windows and web (read its source): use `DropTarget` on Home for Task 19. Packages added: `desktop_drop`, `web`.
+  - Home: "Add" now opens a sheet with "Add photos" / "Add a folder" when `picker.canPickFolder` (`addPhotosFlow` in `home_screen.dart`). Save bar and viewer show the sharer's label ("Show in folder" with a folder icon on Windows, hidden on the web).
+  - **Not verified:** the IndexedDB stores have NO test. `flutter test --platform chrome` fails here even for a one-line test ("Connection closed before test suite loaded"), so I removed my Chrome test file. Plan for Task 20: build a small web entry (for example `tool/web_selftest/main.dart`, `flutter build web --target ...`), serve it, run it twice in headless Chrome with the same `--user-data-dir` (first run saves a layout and a font, second run loads them) and read the result with `--dump-dom`; the same page can time encoding one 4000x3000 photo (Task 20 Step 3). The web build itself has not been tried yet, so `package:web` use in `idb_web.dart` and `platform_services_web.dart` compiled only under `flutter analyze`. The Windows pieces (`WindowsFileSharer`, `FolderSaver` with the real dialogs, `DesktopPhotoPicker.pickPhotos`) are untested beyond the injected-function tests.
+  - **NEXT:** Task 19 (Windows runner title/size/icon, wide-window layout, editor shortcuts, drag and drop with `DropTarget`, goldens at 1280x800, `flutter build windows --release`, screenshot, `dist/windows/` and zip), then Task 20 (web build with `--base-href /app/`, served from a local folder so it is at `http://localhost:8765/app/`, headless Chrome screenshot, selftest above, README). Window and website title: "e-Layout" (changed since the plan); do not design icons.
+
+- 2026-11-15 (Task 21 stage, for the Task 19 and 20 builder): Part 4 Task 21 already changed the Windows runner title ("e-Layout" in main.cpp), Runner.rc strings, app_icon.ico, and the web files index.html, manifest.json, favicon and icons, and added web/.htaccess and windows/installer/e-layout.iss. Window size, the wide layout, goldens, the Windows zip, the web screenshot/selftest and README are still yours. Details are in the Handoff notes of 2026-11-15-part4-online-release.md. In Git Bash use MSYS_NO_PATHCONV=1 for flutter build web --base-href /app/.

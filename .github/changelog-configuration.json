@@ -1,0 +1,44 @@
+{
+  "categories": [
+    {
+      "title": "## New features",
+      "labels": ["feat"],
+      "exclude_labels": [],
+      "label_extractor": [
+        { "pattern": "^feat(\\(.+\\))?:", "target": "feat", "on_property": "title" }
+      ]
+    },
+    {
+      "title": "## Improvements",
+      "labels": ["perf", "improvement"],
+      "label_extractor": [
+        { "pattern": "^perf(\\(.+\\))?:", "target": "perf", "on_property": "title" },
+        { "pattern": "^improvement(\\(.+\\))?:", "target": "improvement", "on_property": "title" }
+      ]
+    },
+    {
+      "title": "## Fixes",
+      "labels": ["fix"],
+      "label_extractor": [
+        { "pattern": "^fix(\\(.+\\))?:", "target": "fix", "on_property": "title" }
+      ]
+    },
+    {
+      "title": "## Changes",
+      "labels": ["chore", "refactor", "docs"],
+      "label_extractor": [
+        { "pattern": "^chore(\\(.+\\))?:", "target": "chore", "on_property": "title" },
+        { "pattern": "^refactor(\\(.+\\))?:", "target": "refactor", "on_property": "title" },
+        { "pattern": "^docs(\\(.+\\))?:", "target": "docs", "on_property": "title" }
+      ]
+    }
+  ],
+  "ignore_labels": [],
+  "sort": "ASC",
+  "template": "#{{CHANGELOG}}",
+  "pr_template": "- #{{TITLE}} (#{{MERGE_SHA}})",
+  "empty_template": "No notable changes.",
+  "max_tags_to_fetch": 20,
+  "max_pull_requests": 200,
+  "max_back_track_time_days": 365
+}

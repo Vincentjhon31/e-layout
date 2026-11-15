@@ -1,0 +1,46 @@
+{
+  "updated_at": "2026-11-15T08:00:00+00:00",
+  "releases": [
+    {
+      "version": "1.0.0",
+      "build": 1,
+      "date": "2026-11-15",
+      "whats_new": [
+        "Put your office's layout on a whole batch of photos at full size",
+        "Works without internet: add, edit and save photos anywhere",
+        "The PIO footer comes ready to use"
+      ],
+      "files": {
+        "android": {
+          "name": "e-layout-1.0.0.apk",
+          "size": 56941479,
+          "sha256": "04e89884136035b67ae23a360ef0eb181d93a9f15c85a0daf27b3742b83905ad",
+          "url": "https://pio.bongabong.gov.ph/download/files/e-layout-1.0.0.apk"
+        },
+        "windows": {
+          "name": "e-layout-1.0.0-setup.exe",
+          "size": 31457280,
+          "sha256": "2842a9f3a74bdcdf32bec79fbf30ad381e324d9a4af83d619468c7edee368cbe",
+          "url": "https://pio.bongabong.gov.ph/download/files/e-layout-1.0.0-setup.exe"
+        }
+      }
+    },
+    {
+      "version": "0.9.0",
+      "build": 1,
+      "date": "2026-10-20",
+      "whats_new": [
+        "First preview for the PIO",
+        "Save photos in one go"
+      ],
+      "files": {
+        "android": {
+          "name": "e-layout-0.9.0.apk",
+          "size": 54001234,
+          "sha256": "b7d760218e47cd6dd3fe37dadc6fa7d87c8e72313728a13a99bc573996d16902",
+          "url": "https://pio.bongabong.gov.ph/download/files/e-layout-0.9.0.apk"
+        }
+      }
+    }
+  ]
+}

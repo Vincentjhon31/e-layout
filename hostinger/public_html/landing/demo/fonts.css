@@ -1,0 +1,38 @@
+/* Typefaces bundled with the app (all SIL Open Font License, see fonts/licenses). */
+@font-face { font-family: "Anton"; src: url("fonts/anton-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("fonts/barlow-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("fonts/barlow-500.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("fonts/barlow-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("fonts/barlow-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("fonts/barlow-800.woff2") format("woff2"); font-weight: 800; font-display: swap; }
+@font-face { font-family: "Barlow Condensed"; src: url("fonts/barlow-condensed-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Barlow Condensed"; src: url("fonts/barlow-condensed-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Barlow Condensed"; src: url("fonts/barlow-condensed-800.woff2") format("woff2"); font-weight: 800; font-display: swap; }
+@font-face { font-family: "Bebas Neue"; src: url("fonts/bebas-neue-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Cinzel"; src: url("fonts/cinzel-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Cinzel"; src: url("fonts/cinzel-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Dancing Script"; src: url("fonts/dancing-script-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Dancing Script"; src: url("fonts/dancing-script-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Fira Sans Condensed"; src: url("fonts/fira-sans-condensed-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Fira Sans Condensed"; src: url("fonts/fira-sans-condensed-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Fira Sans Condensed"; src: url("fonts/fira-sans-condensed-800.woff2") format("woff2"); font-weight: 800; font-display: swap; }
+@font-face { font-family: "Great Vibes"; src: url("fonts/great-vibes-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Libre Baskerville"; src: url("fonts/libre-baskerville-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Libre Baskerville"; src: url("fonts/libre-baskerville-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Montserrat"; src: url("fonts/montserrat-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Montserrat"; src: url("fonts/montserrat-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Montserrat"; src: url("fonts/montserrat-800.woff2") format("woff2"); font-weight: 800; font-display: swap; }
+@font-face { font-family: "Nunito"; src: url("fonts/nunito-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Nunito"; src: url("fonts/nunito-800.woff2") format("woff2"); font-weight: 800; font-display: swap; }
+@font-face { font-family: "Open Sans"; src: url("fonts/open-sans-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Open Sans"; src: url("fonts/open-sans-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Open Sans"; src: url("fonts/open-sans-800.woff2") format("woff2"); font-weight: 800; font-display: swap; }
+@font-face { font-family: "Oswald"; src: url("fonts/oswald-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Oswald"; src: url("fonts/oswald-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Pacifico"; src: url("fonts/pacifico-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Playfair Display"; src: url("fonts/playfair-display-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Playfair Display"; src: url("fonts/playfair-display-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Playfair Display"; src: url("fonts/playfair-display-900.woff2") format("woff2"); font-weight: 900; font-display: swap; }
+@font-face { font-family: "Poppins"; src: url("fonts/poppins-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Poppins"; src: url("fonts/poppins-600.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Poppins"; src: url("fonts/poppins-800.woff2") format("woff2"); font-weight: 800; font-display: swap; }

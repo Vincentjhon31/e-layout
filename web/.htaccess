@@ -1,0 +1,12 @@
+# Copied into every web build, so it ends up as /app/.htaccess on the site.
+Options -Indexes
+AddType application/wasm .wasm
+
+# Files that must never be served from an old cache, so a new version shows up at once.
+<IfModule mod_headers.c>
+  <FilesMatch "^(index\.html|main\.dart\.js|main\.dart\.wasm|main\.dart\.mjs|flutter\.js|flutter_bootstrap\.js|flutter_service_worker\.js|version\.json|manifest\.json)$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+</IfModule>

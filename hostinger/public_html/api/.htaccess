@@ -1,0 +1,17 @@
+# e-Layout site API
+Options -Indexes
+
+# _lib.php is a helper, not a page.
+<Files "_lib.php">
+  Require all denied
+</Files>
+
+# Pieces of a release file are up to 8 MB (the API itself enforces the limit).
+<IfModule mod_php.c>
+  php_value upload_max_filesize 12M
+  php_value post_max_size 13M
+</IfModule>
+<IfModule lsapi_module>
+  php_value upload_max_filesize 12M
+  php_value post_max_size 13M
+</IfModule>

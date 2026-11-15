@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'self'; form-action 'self'">
+  <title>e-Layout: your office's layout on every photo</title>
+  <meta name="description" content="e-Layout puts your office's layout on a whole batch of photos at full size. Free from the Bongabong Public Information Office, for Android, Windows and the browser. Works without internet.">
+  <meta name="theme-color" content="#1A6FB3">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="e-Layout: your office's layout on every photo">
+  <meta property="og:description" content="Free from the Bongabong Public Information Office, for Android, Windows and the browser. Works without internet.">
+  <meta property="og:image" content="https://pio.bongabong.gov.ph/landing/og.png">
+  <meta property="og:url" content="https://pio.bongabong.gov.ph/">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="apple-touch-icon" href="/landing/apple-touch-icon.png">
+  <link rel="stylesheet" href="/landing/demo/fonts.css">
+  <link rel="stylesheet" href="/landing/landing.css">
+</head>
+<body>
+  <header class="mast">
+    <div class="wrap mast-in">
+      <a class="brand" href="/">
+        <img src="/landing/seal-96.png" alt="Seal of the Municipality of Bongabong" width="44" height="44">
+        <span>
+          <span class="brand-name">e-Layout</span>
+          <span class="brand-sub">Bongabong Public Information Office</span>
+        </span>
+      </a>
+      <nav class="mast-links" aria-label="Main">
+        <a href="/download/">Download</a>
+        <a href="/app/">Open in browser</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero wrap" aria-labelledby="hero-h">
+      <img class="hero-icon" src="/landing/app-icon.png" alt="" width="88" height="88">
+      <h1 id="hero-h">Put your office's layout on every photo at once</h1>
+      <p class="lede">Pick the PIO footer or your office's own layout, add the photos from an event, and save them all at full size. e-Layout is the new name of PIO Photo Layout.</p>
+      <div class="buttons" id="buttons">
+        <a class="btn" id="btn-android" data-platform="android" href="/download/">
+          <span class="btn-title">Download for Android</span>
+          <span class="btn-sub">Android phones and tablets</span>
+        </a>
+        <a class="btn" id="btn-windows" data-platform="windows" href="/download/">
+          <span class="btn-title">Download for Windows</span>
+          <span class="btn-sub">Windows 10 and 11</span>
+        </a>
+        <a class="btn" id="btn-browser" data-platform="browser" href="/app/">
+          <span class="btn-title">Use it in your browser</span>
+          <span class="btn-sub">Nothing to install</span>
+        </a>
+      </div>
+      <p class="facts">Free &middot; Works without internet &middot; Your photos stay on your device</p>
+    </section>
+
+    <section class="wrap demo" aria-labelledby="demo-h">
+      <figure class="sheet">
+        <div class="sheet-bar">
+          <h2 class="sheet-title" id="demo-h">Three photos from one event, saved with the PIO footer</h2>
+          <div class="toggle" role="group" aria-label="Show the photos">
+            <button type="button" data-footer="on" aria-pressed="true">With the layout</button>
+            <button type="button" data-footer="off" aria-pressed="false">Without</button>
+          </div>
+        </div>
+        <div class="frames">
+          <div class="frame wide">
+            <canvas data-scene="field" data-shape="landscape" width="900" height="600" role="img"></canvas>
+            <p class="frame-name" data-name="IMG_0418">IMG_0418_PIO.jpg</p>
+            <p class="frame-size">6000 &times; 4000</p>
+          </div>
+          <div class="frame tall">
+            <canvas data-scene="coast" data-shape="portrait" width="450" height="600" role="img"></canvas>
+            <p class="frame-name" data-name="IMG_0421">IMG_0421_PIO.jpg</p>
+            <p class="frame-size">3024 &times; 4032</p>
+          </div>
+          <div class="frame square">
+            <canvas data-scene="terraces" data-shape="square" width="600" height="600" role="img"></canvas>
+            <p class="frame-name" data-name="IMG_0430">IMG_0430_PIO.jpg</p>
+            <p class="frame-size">3024 &times; 3024</p>
+          </div>
+        </div>
+        <figcaption>These are drawings, not real photos. The footer on them was drawn just now from the real PIO layout.</figcaption>
+      </figure>
+    </section>
+
+    <section class="how" id="how" aria-labelledby="how-h">
+      <div class="wrap how-in">
+        <div class="how-text">
+          <h2 id="how-h">How it works</h2>
+          <ol class="steps">
+            <li>
+              <h3>Pick a layout</h3>
+              <p>The PIO footer comes with the app. An office with its own layout picks that one, or makes one in the editor.</p>
+            </li>
+            <li>
+              <h3>Add the photos</h3>
+              <p>Choose a whole event's photos at once. Each one shows up with the layout on it.</p>
+            </li>
+            <li>
+              <h3>Save them</h3>
+              <p>Every photo keeps its full size and its name, plus _PIO. On a phone they go to Photos, on a computer into a folder you choose, and in the browser into one ZIP file.</p>
+            </li>
+          </ol>
+        </div>
+        <div class="phones" aria-hidden="false">
+          <img src="/landing/screens/home.webp" width="390" height="844" loading="lazy"
+            alt="The e-Layout home screen on a phone, with a grid of photos that each show the layout along the bottom.">
+          <img src="/landing/screens/editor.webp" width="390" height="844" loading="lazy"
+            alt="The layout editor on a phone, with the PIO footer on a sample photo and the tools to change it below.">
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap pair" aria-label="Offline and privacy">
+      <div class="panel">
+        <h2>Works without internet</h2>
+        <p>Adding photos, editing layouts and saving photos never need a connection. Only downloading the app, checking for a new version and the free font library do.</p>
+      </div>
+      <div class="panel">
+        <h2>Your photos stay on your device</h2>
+        <p>e-Layout never uploads your photos. Everything happens on your phone or computer, or in your browser. Saved copies leave out the camera's hidden details, such as the GPS location.</p>
+      </div>
+    </section>
+
+    <section class="wrap offices" aria-labelledby="offices-h">
+      <h2 id="offices-h">Every office can have its own layout</h2>
+      <p>MDRRMO, the Sangguniang Bayan or any other office can make its layout in the editor: the office name, its seal and logos, contact lines, a header or a footer band. Share the layout as a file, so everyone in the office uses the same one.</p>
+      <ul class="can">
+        <li>Text in free fonts, or font files the office already uses</li>
+        <li>Shapes, bands, and icons for phone, email, Facebook and location</li>
+        <li>Logos from PNG files, with the white background taken out when needed</li>
+        <li>Groups, so a logo and its caption move and resize together</li>
+        <li>Pieces stay at the top or bottom edge, so one layout fits wide and tall photos</li>
+      </ul>
+    </section>
+
+    <section class="wrap good" aria-labelledby="good-h">
+      <h2 id="good-h">Good to know</h2>
+      <dl>
+        <div>
+          <dt>Which phones and computers?</dt>
+          <dd>Android 7 or newer, Windows 10 and 11 (64-bit), and any up-to-date browser, including on an iPhone or a Mac.</dd>
+        </div>
+        <div>
+          <dt>Is it free?</dt>
+          <dd>Yes. e-Layout is made by the Municipality of Bongabong.</dd>
+        </div>
+        <div>
+          <dt>Does it need the internet?</dt>
+          <dd>Not to add, edit or save photos. Only downloading, checking for a new version and the free font library do.</dd>
+        </div>
+        <div>
+          <dt>I made layouts in the old browser version.</dt>
+          <dd>They are still there. Open the <a href="/app.html">classic version</a> in the same browser, export each layout as a file, then import the file in e-Layout.</dd>
+        </div>
+        <div>
+          <dt>How do I update?</dt>
+          <dd>The app tells you when a new version is ready and installs it for you. Your layouts and settings stay.</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="wrap contact" aria-labelledby="contact-h">
+      <h2 id="contact-h">Contact the PIO</h2>
+      <p>Questions, or a layout for your office? Message the Bongabong Public Information Office on Facebook, or visit the Public Information Office at the Office of the Municipal Mayor, Bongabong, Oriental Mindoro.</p>
+    </section>
+  </main>
+
+  <footer class="end">
+    <div class="wrap">
+      <p class="end-line">Public Information Office &middot; Office of the Municipal Mayor &middot; Municipality of Bongabong, Oriental Mindoro</p>
+      <p class="end-links">
+        <a href="/download/">Download</a>
+        <a href="/app/">Use it in your browser</a>
+        <a href="/app.html">Classic version</a>
+        <a href="/download/#changes">What's new</a>
+      </p>
+    </div>
+  </footer>
+
+  <!-- Classic scripts (not modules), the same files the old tool uses, copied by tool/site_copy_demo.py. -->
+  <script src="/landing/demo/layouts.js"></script>
+  <script src="/landing/demo/fonts.js"></script>
+  <script src="/landing/demo/icons.js"></script>
+  <script src="/landing/demo/model.js"></script>
+  <script src="/landing/demo/render.js"></script>
+  <script src="/landing/landing.js"></script>
+</body>
+</html>

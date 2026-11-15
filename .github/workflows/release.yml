@@ -1,0 +1,281 @@
+name: Release
+
+# Runs when a tag such as v1.0.0+1 is pushed (see RELEASE_GUIDE.md).
+# Builds the Android APK, the Windows installer and the website zip, puts them on a GitHub
+# Release, and (when switched on) publishes them to the download page.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency: release-${{ github.ref }}
+
+env:
+  FLUTTER_VERSION: '3.44.1'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      notes: ${{ steps.notes.outputs.notes }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check that the tag matches the version in the code
+        run: python3 scripts/check_version.py "$GITHUB_REF_NAME"
+
+      - name: Check the files for secrets and private photos
+        run: python3 tool/check_tree.py
+
+      - name: Read the "What's new" notes for this version
+        # First, so a release with no notes for users (or notes that mention internal details)
+        # stops before anything is built.
+        id: notes
+        run: |
+          python3 scripts/whats_new_for_release.py "$GITHUB_REF_NAME" > whats_new.txt
+          {
+            echo 'notes<<WHATS_NEW_EOF'
+            cat whats_new.txt
+            echo 'WHATS_NEW_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Work out the version number
+        id: version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${VERSION%%+*}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  android:
+    needs: prepare
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Set up Android signing
+        # Fails rather than signing with a throwaway key: every release must carry the same
+        # key, or phones refuse to update the app.
+        env:
+          KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_FILE" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "Missing Android signing secrets. Add KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD in the repository settings (see RELEASE_GUIDE.md)."
+            exit 1
+          fi
+          echo "$KEYSTORE_FILE" | base64 --decode > android/app/upload-keystore.jks
+          printf 'storeFile=upload-keystore.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$KEYSTORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
+
+      - name: Build the release APK
+        run: flutter build apk --release
+
+      - name: Name the APK
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk "dist/e-layout-${VERSION}.apk"
+          ls -lh dist
+
+      - name: Keep the APK for the next jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: dist/e-layout-*.apk
+          if-no-files-found: error
+
+      - name: Build the categorized changelog
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v4
+        with:
+          configuration: .github/changelog-configuration.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the GitHub Release
+        # The apps read ONLY the lines between the what's-new markers (keep them if you edit
+        # this release on GitHub); the generated changelog below them is for developers.
+        uses: softprops/action-gh-release@v2
+        with:
+          name: e-Layout ${{ needs.prepare.outputs.version }}
+          files: dist/e-layout-*.apk
+          body: |
+            ## What's new
+            <!-- whats-new -->
+            ${{ needs.prepare.outputs.notes }}
+            <!-- /whats-new -->
+
+            Download e-Layout from https://pio.bongabong.gov.ph/download/ or below.
+
+            - Android: `e-layout-${{ needs.prepare.outputs.version }}.apk`. Installing a new version keeps your layouts and settings.
+            - Windows: `e-layout-${{ needs.prepare.outputs.version }}-setup.exe`. It updates an existing install in place.
+            - Website: `e-layout-${{ needs.prepare.outputs.version }}-web.zip` goes into the site's `app/` folder (see hostinger/README.md).
+
+            ${{ steps.changelog.outputs.changelog }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  windows:
+    # After the Android job, so the release it creates already exists.
+    needs: [prepare, android]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Install the MSVC ATL component
+        # Plugins may need ATL headers (atlbase.h), which the runner's default C++ workload
+        # lacks. Cheap, so kept.
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -property installationPath
+          $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+          & $vsInstaller modify --installPath "$vsPath" --add Microsoft.VisualStudio.Component.VC.ATL --quiet --norestart | Out-Null
+
+      - name: Build the release Windows app
+        run: flutter build windows --release
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Build the Windows installer
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v') -replace '\+.*',''
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" "windows\installer\e-layout.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Keep the installer for the next jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: exe
+          path: installer_output/e-layout-*-setup.exe
+          if-no-files-found: error
+
+      - name: Add the installer to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer_output/e-layout-*-setup.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  web:
+    needs: [prepare, android]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build the website version
+        # It lives at https://pio.bongabong.gov.ph/app/
+        run: flutter build web --release --base-href /app/
+
+      - name: Check the build has its .htaccess
+        run: test -f build/web/.htaccess || { echo "build/web/.htaccess is missing (it comes from web/.htaccess)."; exit 1; }
+
+      - name: Zip the website version
+        run: |
+          (cd build/web && zip -qr "../../e-layout-${VERSION}-web.zip" .)
+          ls -lh e-layout-*-web.zip
+
+      - name: Add the zip to the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: e-layout-*-web.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-site:
+    # Puts the new files on the download page, where the apps look for updates. Runs even when
+    # only the Windows job failed, so Android users are not left without their update.
+    needs: [prepare, android, windows]
+    if: ${{ always() && needs.android.result == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get the APK
+        uses: actions/download-artifact@v4
+        with:
+          name: apk
+          path: dist
+
+      - name: Get the Windows installer
+        if: ${{ needs.windows.result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: exe
+          path: installer_output
+
+      - name: Publish to the download page
+        env:
+          RELEASE_UPLOAD_SECRET: ${{ secrets.RELEASE_UPLOAD_SECRET }}
+          PUBLISH_TO_SITE: ${{ vars.PUBLISH_TO_SITE }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
+        run: |
+          if [ "$PUBLISH_TO_SITE" != "true" ]; then
+            echo "::warning::Publishing to the download page is switched off (repository variable PUBLISH_TO_SITE). The files are on the GitHub release."
+            exit 0
+          fi
+          python3 scripts/publish_release.py android "dist/e-layout-${VERSION}.apk"
+          if [ "$WINDOWS_RESULT" = "success" ]; then
+            python3 scripts/publish_release.py windows "installer_output/e-layout-${VERSION}-setup.exe"
+          else
+            echo "::warning::The Windows installer was not built, so Windows users get no update this time."
+          fi

@@ -1,0 +1,186 @@
+name: pio_photo_layout
+description: "Puts an office layout on a batch of photos at full resolution."
+# The following line prevents the package from being accidentally published to
+# pub.dev using `flutter pub publish`. This is preferred for private packages.
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+# The following defines the version and build number for your application.
+# A version number is three numbers separated by dots, like 1.2.43
+# followed by an optional build number separated by a +.
+# Both the version and the builder number may be overridden in flutter
+# build by specifying --build-name and --build-number, respectively.
+# In Android, build-name is used as versionName while build-number used as versionCode.
+# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
+# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
+# Read more about iOS versioning at
+# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
+# In Windows, build-name is used as the major, minor, and patch parts
+# of the product and file versions while build-number is used as the build suffix.
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.1
+
+# Dependencies specify other packages that your package needs in order to work.
+# To automatically upgrade your package dependencies to the latest versions
+# consider running `flutter pub upgrade --major-versions`. Alternatively,
+# dependencies can be manually updated by changing the version numbers below to
+# the latest version available on pub.dev. To see which dependencies have newer
+# versions available, run `flutter pub outdated`.
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # The following adds the Cupertino Icons font to your application.
+  # Use with the CupertinoIcons class for iOS style icons.
+  cupertino_icons: ^2.0.0
+  path_parsing: ^1.1.0
+  archive: ^4.7.1
+  path: ^1.9.1
+  path_provider: ^2.1.6
+  shared_preferences: ^2.5.6
+  image: ^4.13.0
+  image_picker: ^1.2.4
+  file_picker: ^13.3.3
+  gal: ^3.0.0
+  share_plus: ^13.3.1
+  http: ^1.6.0
+  desktop_drop: ^0.8.0
+  web: ^1.1.1
+  crypto: ^3.0.8
+  url_launcher: ^6.3.3
+  http_parser: ^4.1.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  # The "flutter_lints" package below contains a set of recommended lints to
+  # encourage good coding practices. The lint set provided by the package is
+  # activated in the `analysis_options.yaml` file located at the root of your
+  # package. See that file for information about deactivating specific lint
+  # rules and activating additional ones.
+  flutter_lints: ^6.0.0
+flutter:
+  assets:
+    - assets/layouts/
+    - assets/img/
+    - assets/whats_new.md
+    - assets/fonts/licenses/
+  fonts:
+    - family: Anton
+      fonts:
+        - asset: assets/fonts/anton-400.ttf
+          weight: 400
+    - family: Barlow
+      fonts:
+        - asset: assets/fonts/barlow-400.ttf
+          weight: 400
+        - asset: assets/fonts/barlow-500.ttf
+          weight: 500
+        - asset: assets/fonts/barlow-600.ttf
+          weight: 600
+        - asset: assets/fonts/barlow-700.ttf
+          weight: 700
+        - asset: assets/fonts/barlow-800.ttf
+          weight: 800
+    - family: Barlow Condensed
+      fonts:
+        - asset: assets/fonts/barlow-condensed-400.ttf
+          weight: 400
+        - asset: assets/fonts/barlow-condensed-600.ttf
+          weight: 600
+        - asset: assets/fonts/barlow-condensed-800.ttf
+          weight: 800
+    - family: Bebas Neue
+      fonts:
+        - asset: assets/fonts/bebas-neue-400.ttf
+          weight: 400
+    - family: Cinzel
+      fonts:
+        - asset: assets/fonts/cinzel-400.ttf
+          weight: 400
+        - asset: assets/fonts/cinzel-700.ttf
+          weight: 700
+    - family: Dancing Script
+      fonts:
+        - asset: assets/fonts/dancing-script-400.ttf
+          weight: 400
+        - asset: assets/fonts/dancing-script-700.ttf
+          weight: 700
+    - family: Fira Sans Condensed
+      fonts:
+        - asset: assets/fonts/fira-sans-condensed-400.ttf
+          weight: 400
+        - asset: assets/fonts/fira-sans-condensed-600.ttf
+          weight: 600
+        - asset: assets/fonts/fira-sans-condensed-800.ttf
+          weight: 800
+    - family: Great Vibes
+      fonts:
+        - asset: assets/fonts/great-vibes-400.ttf
+          weight: 400
+    - family: Libre Baskerville
+      fonts:
+        - asset: assets/fonts/libre-baskerville-400.ttf
+          weight: 400
+        - asset: assets/fonts/libre-baskerville-700.ttf
+          weight: 700
+    - family: Montserrat
+      fonts:
+        - asset: assets/fonts/montserrat-400.ttf
+          weight: 400
+        - asset: assets/fonts/montserrat-700.ttf
+          weight: 700
+        - asset: assets/fonts/montserrat-800.ttf
+          weight: 800
+    - family: Nunito
+      fonts:
+        - asset: assets/fonts/nunito-400.ttf
+          weight: 400
+        - asset: assets/fonts/nunito-800.ttf
+          weight: 800
+    - family: Open Sans
+      fonts:
+        - asset: assets/fonts/open-sans-400.ttf
+          weight: 400
+        - asset: assets/fonts/open-sans-700.ttf
+          weight: 700
+        - asset: assets/fonts/open-sans-800.ttf
+          weight: 800
+    - family: Oswald
+      fonts:
+        - asset: assets/fonts/oswald-400.ttf
+          weight: 400
+        - asset: assets/fonts/oswald-600.ttf
+          weight: 600
+    - family: Pacifico
+      fonts:
+        - asset: assets/fonts/pacifico-400.ttf
+          weight: 400
+    - family: Playfair Display
+      fonts:
+        - asset: assets/fonts/playfair-display-400.ttf
+          weight: 400
+        - asset: assets/fonts/playfair-display-700.ttf
+          weight: 700
+        - asset: assets/fonts/playfair-display-900.ttf
+          weight: 900
+    - family: Poppins
+      fonts:
+        - asset: assets/fonts/poppins-400.ttf
+          weight: 400
+        - asset: assets/fonts/poppins-600.ttf
+          weight: 600
+        - asset: assets/fonts/poppins-800.ttf
+          weight: 800
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/ui/inter-400.ttf
+          weight: 400
+        - asset: assets/fonts/ui/inter-500.ttf
+          weight: 500
+        - asset: assets/fonts/ui/inter-600.ttf
+          weight: 600
+        - asset: assets/fonts/ui/inter-700.ttf
+          weight: 700

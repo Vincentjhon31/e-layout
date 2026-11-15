@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'self'; form-action 'self'">
+  <title>Download e-Layout</title>
+  <meta name="description" content="Download e-Layout for Android and Windows, or use it in your browser: put your office's layout on a batch of photos at full size.">
+  <meta name="theme-color" content="#1A6FB3">
+  <link rel="icon" href="/favicon.ico" sizes="48x48">
+  <link rel="apple-touch-icon" href="/landing/apple-touch-icon.png">
+  <link rel="stylesheet" href="download.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-in">
+      <a class="brand" href="/">
+        <img src="seal-96.png" alt="Seal of the Municipality of Bongabong" width="40" height="40">
+        <span>
+          <span class="brand-name">Municipality of Bongabong</span>
+          <span class="brand-sub">Oriental Mindoro</span>
+        </span>
+      </a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero" aria-labelledby="title">
+      <img class="hero-icon" src="app-icon.png" alt="" width="96" height="96">
+      <h1 id="title">e-Layout</h1>
+      <p class="meta" id="meta">Looking for the newest version&hellip;</p>
+      <p class="lead">Put your office's layout on a whole batch of photos at full size. Free from the Bongabong Public Information Office. Works without internet.</p>
+
+      <div class="buttons" id="buttons">
+        <a class="btn" id="btn-android" data-platform="android" href="#how" aria-disabled="true">
+          <span class="btn-title">Download for Android</span>
+          <span class="btn-sub">Android phones and tablets</span>
+        </a>
+        <a class="btn" id="btn-windows" data-platform="windows" href="#how" aria-disabled="true">
+          <span class="btn-title">Download for Windows</span>
+          <span class="btn-sub">Windows 10 and 11</span>
+        </a>
+        <a class="btn" id="btn-browser" data-platform="browser" href="/app/">
+          <span class="btn-title">Use it in your browser</span>
+          <span class="btn-sub">Nothing to install</span>
+        </a>
+      </div>
+      <p class="note" id="note" hidden></p>
+    </section>
+
+    <section class="card" id="how" aria-labelledby="how-h">
+      <h2 id="how-h">How to install</h2>
+      <div class="cols">
+        <div>
+          <h3>On Android</h3>
+          <ol>
+            <li>Tap <b>Download for Android</b>.</li>
+            <li>Open the file from your notifications or the Files app.</li>
+            <li>If your phone asks, allow installing apps from your browser or the Files app, then tap <b>Install</b>.</li>
+            <li>If Play Protect asks, tap <b>More details</b>, then <b>Install anyway</b>.</li>
+          </ol>
+          <p class="small">A newer version installs over the old one, and your layouts and settings stay.</p>
+        </div>
+        <div>
+          <h3>On Windows</h3>
+          <ol>
+            <li>Click <b>Download for Windows</b>.</li>
+            <li>Open the installer. It needs no administrator rights.</li>
+            <li>If Windows says it protected your PC, click <b>More info</b>, then <b>Run anyway</b>.</li>
+          </ol>
+          <p class="small">A newer version installs over the old one, and your layouts and settings stay.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="changes" aria-labelledby="changes-h">
+      <h2 id="changes-h">What's new</h2>
+      <p class="empty" id="empty" hidden>The first download will appear here soon.</p>
+      <p class="empty" id="error" hidden>The download list couldn't be loaded. Check your internet connection and refresh this page.</p>
+      <div id="releases"></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <p>Public Information Office &middot; Office of the Municipal Mayor &middot; Municipality of Bongabong, Oriental Mindoro</p>
+      <p><a href="/">About e-Layout</a> &middot; <a href="/app/">Use it in your browser</a> &middot; <a href="/app.html">Classic version</a></p>
+    </div>
+  </footer>
+
+  <script src="download.js"></script>
+</body>
+</html>

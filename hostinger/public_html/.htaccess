@@ -1,0 +1,32 @@
+# pio.bongabong.gov.ph: the e-Layout site.
+#
+# KEEP the classic browser tool: /app.html and its folders css/, js/, fonts/,
+# img/ and layouts/ must stay where they are, so links people saved keep
+# working and layouts saved in that browser stay reachable. Never delete them.
+# (This folder's own landing/ holds a separate copy of what the landing page needs.)
+
+Options -Indexes
+DirectoryIndex index.html
+
+# For the day the classic version is retired, remove the # in front of the next line:
+# RedirectMatch 301 ^/app\.html$ /app/
+
+# Never serve backups, logs or scripts left in the folder.
+<FilesMatch "(^\.ht|\.(bak|old|orig|log|sql|ini|sh|py)$)">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  # Pages always check for a newer copy.
+  <FilesMatch "\.html$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+</IfModule>

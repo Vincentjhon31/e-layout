@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="stylesheet" href="../../css/fonts.css">
+<style>html,body{margin:0;padding:0;background:#fff}canvas{display:block}</style>
+</head><body>
+<canvas id="c" width="1200" height="800"></canvas>
+<script src="../../layouts/layouts.js"></script>
+<script src="../../js/fonts.js"></script>
+<script src="../../js/icons.js"></script>
+<script src="../../js/model.js"></script>
+<script src="../../js/render.js"></script>
+<script>
+(async () => {
+  const PIO = window.PIO;
+  const doc = PIO.model.sanitize(window.PIO_LAYOUTS[0]);
+  PIO.model.upgradePins(doc);
+  const prep = await PIO.render.prepare(doc);
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 800);
+  g.addColorStop(0, '#9EC5E8'); g.addColorStop(1, '#5E8F5A');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 1200, 800);
+  PIO.render.drawLayout(ctx, doc, prep, 800, 1);
+  document.title = 'done';
+})();
+</script></body></html>

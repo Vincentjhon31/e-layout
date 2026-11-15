@@ -1,0 +1,159 @@
+/* e-Layout landing page. System font for the page, tokens as in the app. The demo's own
+   typefaces (the PIO footer's) come from demo/fonts.css and are only used inside the canvases. */
+:root {
+  --page: #F2F2F7;
+  --card: #FFFFFF;
+  --text: #111418;
+  --soft: #5F6670;
+  --line: #D9DCE1;
+  --accent: #1A6FB3;
+  --on-accent: #FFFFFF;
+  --tint: #E6F0F8;
+  --tile: #DCE3EA;
+  --band-top: #17598F;
+  --band-bottom: #1A6FB3;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page: #000000; --card: #1C1C1E; --text: #FFFFFF; --soft: #A1A1AA; --line: #38383A;
+    --accent: #5CB8FF; --on-accent: #00172B; --tint: #0F2A3F; --tile: #2C2C2E;
+    --band-top: #0E2F4A; --band-bottom: #123E60; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page: #000000; --card: #1C1C1E; --text: #FFFFFF; --soft: #A1A1AA; --line: #38383A;
+  --accent: #5CB8FF; --on-accent: #00172B; --tint: #0F2A3F; --tile: #2C2C2E;
+  --band-top: #0E2F4A; --band-bottom: #123E60; color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--text); font: 400 16px/1.55 var(--font); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, p, ol, ul, dl, dd, figure { margin: 0; }
+a { color: var(--accent); text-underline-offset: 3px; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+.wrap { width: min(1080px, calc(100% - 32px)); margin-inline: auto; }
+h2 { font-size: 26px; font-weight: 700; line-height: 1.2; letter-spacing: -0.2px; }
+
+/* ---------- header ---------- */
+
+.mast { background: var(--card); border-bottom: 1px solid var(--line); }
+.mast-in { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; }
+.brand { display: inline-flex; align-items: center; gap: 12px; min-width: 0; color: var(--text); text-decoration: none; }
+.brand img { flex: none; display: block; width: 44px; height: 44px; }
+.brand-name { display: block; font-size: 20px; font-weight: 700; line-height: 1.15; }
+.brand-sub { display: block; color: var(--soft); font-size: 13px; line-height: 1.2; }
+.mast-links { display: none; gap: 6px; }
+.mast-links a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 12px; border-radius: 10px; color: var(--text); font-weight: 500; text-decoration: none; }
+.mast-links a:hover { background: var(--tint); }
+
+/* ---------- hero ---------- */
+
+.hero { padding: 36px 0 28px; text-align: center; }
+.hero-icon { display: block; width: 88px; height: 88px; margin: 0 auto 18px; border-radius: 20px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18); }
+.hero h1 { max-width: 20ch; margin-inline: auto; font-size: 34px; font-weight: 700; line-height: 1.12; letter-spacing: -0.6px; text-wrap: balance; }
+.lede { max-width: 56ch; margin: 14px auto 0; color: var(--soft); font-size: 18px; line-height: 1.5; }
+.buttons { display: flex; flex-direction: column; gap: 10px; max-width: 420px; margin: 26px auto 0; }
+.btn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 56px; padding: 8px 18px;
+  border: 1.5px solid var(--accent); border-radius: 12px;
+  background: var(--card); color: var(--accent);
+  text-decoration: none; line-height: 1.25;
+}
+.btn-title { font-size: 17px; font-weight: 600; }
+.btn-sub { font-size: 13px; opacity: 0.92; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn:hover { filter: brightness(0.96); }
+.facts { margin-top: 18px; color: var(--soft); font-size: 14px; text-wrap: balance; }
+
+/* ---------- the live demo ---------- */
+
+.demo { padding-bottom: 36px; }
+.sheet { padding: 16px 14px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 18px; }
+.sheet-bar { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+.sheet-title { font-size: 18px; line-height: 1.25; letter-spacing: 0; }
+.toggle { display: inline-flex; align-self: flex-start; padding: 3px; background: var(--page); border-radius: 10px; }
+.toggle button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 8px; background: transparent; color: var(--soft); font: 500 15px var(--font); cursor: pointer; }
+.toggle button[aria-pressed="true"] { background: var(--card); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
+
+/* Each frame grows in proportion to its shape, so all three end up the same height. */
+.frames { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 10px; }
+.frame { flex: 1 1 calc(50% - 5px); min-width: 0; }
+.frame.wide { flex-basis: 100%; }
+.frame.wide { --r: 1.5; }
+.frame.tall { --r: 0.75; }
+.frame.square { --r: 1; }
+.frame canvas { display: block; width: 100%; height: auto; aspect-ratio: var(--r); background: var(--tile); border-radius: 4px; }
+.frame-name { margin-top: 8px; font-size: 12px; font-weight: 500; line-height: 1.3; overflow-wrap: anywhere; }
+.frame-size { color: var(--soft); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sheet figcaption { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--soft); font-size: 14px; }
+
+/* ---------- how it works ---------- */
+
+.how { margin-top: 20px; padding: 44px 0; background: var(--card); border-block: 1px solid var(--line); }
+.how-in { display: grid; gap: 32px; }
+.steps { display: grid; gap: 22px; margin-top: 22px; padding: 0; list-style: none; counter-reset: step; }
+.steps li { display: grid; grid-template-columns: 36px minmax(0, 1fr); column-gap: 14px; counter-increment: step; }
+.steps li::before {
+  content: counter(step); grid-row: span 2; display: grid; place-items: center;
+  width: 36px; height: 36px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-weight: 700;
+}
+.steps h3 { margin-top: 5px; font-size: 19px; font-weight: 600; line-height: 1.25; }
+.steps p { margin-top: 4px; color: var(--soft); }
+.phones { display: flex; justify-content: center; gap: 14px; }
+.phones img { display: block; width: calc(50% - 7px); max-width: 240px; height: auto; border: 1px solid var(--line); border-radius: 22px; }
+
+/* ---------- panels ---------- */
+
+.pair { display: grid; gap: 14px; padding-top: 36px; }
+.panel { padding: 20px 18px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
+.panel h2 { font-size: 21px; }
+.panel p { margin-top: 8px; color: var(--soft); }
+
+.offices { padding-top: 44px; }
+.offices > p { max-width: 62ch; margin-top: 12px; color: var(--soft); }
+.can { display: grid; gap: 8px; margin: 16px 0 0; padding-left: 1.2em; }
+.can li::marker { color: var(--accent); }
+
+.good { padding-top: 44px; }
+.good dl { margin-top: 8px; border-top: 1px solid var(--line); }
+.good dl > div { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.good dt { font-weight: 600; }
+.good dd { margin-top: 4px; color: var(--soft); max-width: 70ch; }
+
+.contact { padding: 44px 0 48px; }
+.contact p { max-width: 62ch; margin-top: 10px; color: var(--soft); }
+
+/* ---------- the page ends on the PIO blue band, like the photos do ---------- */
+
+.end { color: #fff; background: linear-gradient(180deg, var(--band-top), var(--band-bottom)); }
+.end .wrap { padding: 28px 0 34px; text-align: center; }
+.end-line { font-size: 14px; color: rgba(255, 255, 255, 0.9); }
+.end-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 6px; margin-top: 8px; }
+.end-links a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; color: #fff; font-weight: 500; }
+.end :focus-visible { outline-color: #fff; }
+
+@media (min-width: 720px) {
+  .hero { padding: 64px 0 40px; }
+  .hero h1 { max-width: 22ch; font-size: 52px; }
+  .lede { font-size: 20px; }
+  .buttons { max-width: 760px; flex-direction: row; }
+  .btn { flex: 1 1 0; min-width: 0; }
+  .mast-links { display: flex; }
+  .sheet { padding: 22px 24px 18px; }
+  .sheet-bar { flex-direction: row; align-items: center; justify-content: space-between; }
+  .sheet-title { font-size: 20px; }
+  .frames { flex-wrap: nowrap; gap: 18px; }
+  .frame, .frame.wide { flex: var(--r) 1 0; }
+  .frame-name { font-size: 14px; overflow-wrap: normal; }
+  .frame-size { font-size: 13px; }
+  .how { padding: 64px 0; }
+  .how-in { grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); align-items: center; gap: 48px; }
+  .pair { grid-template-columns: 1fr 1fr; gap: 18px; padding-top: 56px; }
+  .panel { padding: 26px 28px; }
+  .offices, .good { padding-top: 64px; }
+  .good dl { display: grid; grid-template-columns: 1fr 1fr; column-gap: 48px; }
+}
