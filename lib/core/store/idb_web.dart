@@ -48,6 +48,13 @@ class IdbBox {
 
   Future<void> delete(String key) => _transaction('readwrite', (s) => s.delete(key.toJS));
 
+  /// The value stored under [key], or null.
+  Future<JSAny?> get(String key) async {
+    final db = await _open();
+    final store = db.transaction(storeName.toJS, 'readonly').objectStore(storeName);
+    return _request(store.get(key.toJS));
+  }
+
   /// Every value, in key order.
   Future<List<JSAny?>> values() async {
     final db = await _open();
