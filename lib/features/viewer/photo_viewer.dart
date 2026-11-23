@@ -438,6 +438,8 @@ class _ViewerPageState extends State<_ViewerPage> {
     _t.dispose();
     _developed?.dispose();
     _image?.dispose();
+    // Free the shared developer's blurred copies made for this page.
+    widget.home.developer?.clearCache();
     super.dispose();
   }
 
