@@ -1040,7 +1040,9 @@ smoothness 0..100 (50); `profile.amount` 0..200 (100).
 2. **Sensitivity to the sRGB port (a judgement, not measured):** the tools that shift most when the
    Rec.2020/OkLab-tuned constants are used in sRGB are those with chroma thresholds, in this order:
    vibrance (`C/0.22`), mixer (`chroma_w = C/0.12`), B&W mix (`C/0.2`), then grading wheel strengths (0.09),
-   then the rest. sRGB chroma values are larger for the same colour, so these ramps saturate sooner.
+   then the rest. Constants are thresholds on OkLab chroma C, which does not depend on the working space;
+   the risk comes from out-of-gamut clipping and from the luma weights and tone-map stage that run before
+   OkLab. Do not rescale the constants.
 3. **Everything is in linear Rec.2020 with OkLab(Rec.2020)**. If e-Layout works in sRGB primaries, the
    matrices change (section 3) and the ported constants (for example 0.22 and 0.12 in the chroma terms)
    were tuned for LightCraft's space; results will be close but not identical. Tests should compare
