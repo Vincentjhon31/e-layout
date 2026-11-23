@@ -43,15 +43,24 @@ class PhotoEditorController extends ChangeNotifier {
   /// The photos the filmstrip shows.
   List<PhotoItem> get photos => home.readyPhotos;
 
+  // The last photo shown, for the moment between Home losing every photo
+  // and the editor closing.
+  PhotoItem? _last;
+
   /// The open photo (the first one if it is gone).
   PhotoItem get photo {
     final list = home.photos;
     for (final p in list) {
-      if (p.id == _openId) return p;
+      if (p.id == _openId) return _last = p;
     }
     final ready = photos;
-    return ready.isNotEmpty ? ready.first : list.first;
+    if (ready.isNotEmpty) return _last = ready.first;
+    if (list.isNotEmpty) return _last = list.first;
+    return _last!;
   }
+
+  /// True when Home has no photos left: the editor closes.
+  bool get empty => home.photos.isEmpty;
 
   /// Where [photo] is in [photos] (0 when it is not ready).
   int get index {
@@ -113,10 +122,12 @@ class PhotoEditorController extends ChangeNotifier {
 
   // ---------- one-step changes ----------
 
-  Future<void> _commit(BatchLook next) async {
+  /// Keeps the look [next] makes as one undo step. A drag still going is
+  /// kept first, as its own step, so [next] builds on it.
+  Future<void> _commit(BatchLook Function() next) async {
     if (changing) await endChange();
     _remember(home.look);
-    await home.setLook(next);
+    await home.setLook(next());
   }
 
   void _remember(BatchLook look) {
@@ -125,34 +136,35 @@ class PhotoEditorController extends ChangeNotifier {
     _redo.clear();
   }
 
-  Future<void> _patch(SettingsPatch p) =>
-      _commit(home.look.withPhotoPatch(photo.id, p));
+  Future<void> _patch(SettingsPatch Function() p) =>
+      _commit(() => home.look.withPhotoPatch(photo.id, p()));
 
   Future<void> setValue(Setting s, double v) =>
-      _patch(SettingsPatch(values: {s: s.clamp(v)}));
+      _patch(() => SettingsPatch(values: {s: s.clamp(v)}));
 
   Future<void> setCurve(CurveChannel c, List<CurvePoint> pts) =>
-      _patch(SettingsPatch(curves: {c: pts}));
+      _patch(() => SettingsPatch(curves: {c: pts}));
 
-  Future<void> setGrayscale(bool on) => _patch(SettingsPatch(grayscale: on));
+  Future<void> setGrayscale(bool on) =>
+      _patch(() => SettingsPatch(grayscale: on));
 
   /// The colour profile's strength, 0 to 2 (1 is 100 %).
-  Future<void> setProfileAmount(double a) {
+  Future<void> setProfileAmount(double a) => _patch(() {
     final p = settings.profile;
-    return _patch(
-      SettingsPatch(profile: ProfileRef(p.id, p.name, a.clamp(0.0, 2.0))),
-    );
-  }
+    return SettingsPatch(profile: ProfileRef(p.id, p.name, a.clamp(0.0, 2.0)));
+  });
 
   /// Applies [p] to this photo only.
-  Future<void> applyPreset(Preset p) => _patch(p.patch);
+  Future<void> applyPreset(Preset p) => _patch(() => p.patch);
 
   /// Makes [groups] of this photo the shared look of every photo.
   Future<void> copyToAll(Set<ToolGroup> groups, {required bool keepSingle}) =>
-      _commit(home.look.copyToAll(photo.id, groups, keepSingle: keepSingle));
+      _commit(
+        () => home.look.copyToAll(photo.id, groups, keepSingle: keepSingle),
+      );
 
   /// This photo follows the shared preset again.
-  Future<void> resetPhoto() => _commit(home.look.resetPhoto(photo.id));
+  Future<void> resetPhoto() => _commit(() => home.look.resetPhoto(photo.id));
 
   /// Keeps this photo's settings as a preset of the person's own.
   Future<Preset> saveAsPreset(String name) => home.savePreset(name, settings);

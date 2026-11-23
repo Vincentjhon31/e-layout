@@ -13,6 +13,7 @@ import '../home/export_job.dart' show plural;
 import 'develop_canvas.dart';
 import 'filmstrip.dart';
 import 'photo_editor_controller.dart';
+import 'select_builder.dart';
 
 /// Windows at least this wide get the tools as a panel beside the photo.
 /// Home has no single switch point: its grid gains columns from 744 pt and
@@ -78,12 +79,23 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    c.addListener(_closeWhenEmpty);
   }
 
   @override
   void dispose() {
+    c.removeListener(_closeWhenEmpty);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// Home lost every photo (cleared elsewhere): nothing is left to edit.
+  void _closeWhenEmpty() {
+    if (!c.empty || _closing) return;
+    _closing = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop();
+    });
   }
 
   @override
@@ -160,7 +172,19 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
       context,
       (ctx) => _SavePresetSheet(
         onSave: (name) async {
-          await c.saveAsPreset(name);
+          try {
+            await c.saveAsPreset(name);
+          } catch (e) {
+            debugPrint('Could not save the preset: $e');
+            if (mounted) {
+              showToast(
+                context,
+                "Couldn't save the preset.",
+                icon: CupertinoIcons.exclamationmark_circle,
+              );
+            }
+            return;
+          }
           if (mounted) {
             showToast(
               context,
@@ -192,9 +216,12 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
       },
       child: CupertinoPageScaffold(
         backgroundColor: colors.page,
-        child: ListenableBuilder(
+        // Only what the frame shows: a slider's ticks redraw the canvas
+        // and the panel, not the bars around them.
+        child: SelectBuilder(
           listenable: c,
-          builder: (context, _) => LayoutBuilder(
+          select: () => c.panel,
+          builder: (context) => LayoutBuilder(
             builder: (context, box) {
               final wide = box.maxWidth >= kEditorWideWidth;
               final top = _TopBar(controller: c, onDone: _done, onMenu: _menu);
@@ -263,6 +290,22 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = controller;
+    return SelectBuilder(
+      listenable: c,
+      select: () => (
+        c.photo.id,
+        c.photo.name,
+        c.index,
+        c.photos.length,
+        c.canUndo,
+        c.canRedo,
+      ),
+      builder: (context) => _bar(context),
+    );
+  }
+
+  Widget _bar(BuildContext context) {
     final colors = AppColors.of(context);
     final c = controller;
     return Container(
@@ -347,12 +390,18 @@ class _PhotoArea extends StatelessWidget {
     return Stack(
       children: [
         Positioned.fill(child: DevelopCanvas(controller: c)),
-        if (c.home.current != null)
-          Positioned(
-            top: 4,
-            right: 8,
-            child: _LayoutToggle(on: c.showLayout, onPressed: c.toggleLayout),
+        // In the band the canvas keeps free at its top, off the photo.
+        Positioned(
+          top: 4,
+          right: 8,
+          child: SelectBuilder(
+            listenable: c,
+            select: () => (c.home.current != null, c.showLayout),
+            builder: (context) => c.home.current == null
+                ? const SizedBox.shrink()
+                : _LayoutToggle(on: c.showLayout, onPressed: c.toggleLayout),
           ),
+        ),
       ],
     );
   }

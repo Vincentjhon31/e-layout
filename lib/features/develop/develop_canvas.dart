@@ -18,6 +18,9 @@ import '../home/home_controller.dart';
 import '../viewer/photo_viewer.dart' show decodeScaled, kViewerEdge;
 import 'photo_editor_controller.dart';
 
+/// Height of the band at the top of the canvas for the labels over it.
+const double kCanvasTopBand = 52;
+
 /// Wait this long after a zoom or pan before rendering at full size.
 const Duration kFullSizeDelay = Duration(milliseconds: 150);
 
@@ -107,6 +110,9 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   // The full-size decode (one photo at a time) and the part rendered from it.
   int? _fullId;
   ui.Image? _full;
+
+  // The photo whose full-size decode failed (not tried again).
+  int? _fullFailedId;
   _Tile? _tile;
   (int, DevelopStats)? _stats;
 
@@ -170,6 +176,10 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     return (_scale(_geometry(p)) * _dpr * 100).round();
   }
 
+  /// The full-size decode is held.
+  @visibleForTesting
+  bool get holdsFullSize => _full != null;
+
   /// A part rendered from the full-size photo is on screen.
   @visibleForTesting
   bool get showsFullSize => _tileShown(c.photo) != null;
@@ -184,13 +194,22 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   /// Space around the fitted photo.
   double get _inset => _view.width >= 600 ? 24 : 12;
 
+  /// Where the fitted photo goes: inside the inset, under the band at the
+  /// top that holds the "Layout" and "Original" labels.
+  Rect get _fitArea {
+    final r = Rect.fromLTRB(
+      _inset,
+      math.max(_inset, kCanvasTopBand),
+      _view.width - _inset,
+      _view.height - _inset,
+    );
+    return r.width > 0 && r.height > 0 ? r : Offset.zero & _view;
+  }
+
   double _fitScale(PhotoGeometry g) {
     if (g.w <= 0 || g.h <= 0 || _view.isEmpty) return 1;
-    final w = _view.width - 2 * _inset, h = _view.height - 2 * _inset;
-    if (w <= 0 || h <= 0) {
-      return math.min(_view.width / g.w, _view.height / g.h);
-    }
-    return math.min(w / g.w, h / g.h);
+    final a = _fitArea;
+    return math.min(a.width / g.w, a.height / g.h);
   }
 
   /// Zoom where one photo pixel is one screen pixel (at least fitted).
@@ -207,10 +226,14 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   Offset _origin(PhotoGeometry g, double s) {
     final w = g.w * s, h = g.h * s;
     final f = _focus ?? Offset(g.w / 2, g.h / 2);
-    double axis(double view, double size, double at) => size <= view
-        ? (view - size) / 2
+    final a = _fitArea;
+    // Smaller than the box: centred in the fit area, kept inside the box.
+    double axis(double view, double size, double at, double middle) =>
+        size <= view
+        ? (middle - size / 2).clamp(0.0, view - size)
         : (view / 2 - at * s).clamp(view - size, 0.0);
-    final x = axis(_view.width, w, f.dx), y = axis(_view.height, h, f.dy);
+    final x = axis(_view.width, w, f.dx, a.center.dx);
+    final y = axis(_view.height, h, f.dy, a.center.dy);
     return Offset(
       (x * _dpr).roundToDouble() / _dpr,
       (y * _dpr).roundToDouble() / _dpr,
@@ -447,7 +470,7 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   /// the fitted copy is too coarse for this zoom.
   (Rect, double)? _fullSizeView(PhotoItem p) {
     final fit = _fit;
-    if (fit == null || _fitId != p.id) return null;
+    if (fit == null || _fitId != p.id || _fullFailedId == p.id) return null;
     final g = _geometry(p);
     final s = _scale(g);
     final k = fit.width / p.width;
@@ -475,9 +498,9 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   ) async {
     final want = _fullSizeView(p);
     if (want == null) {
-      if (_tile != null) {
-        _tile!.image.dispose();
-        _tile = null;
+      // Back at a size the fitted copy covers: the full-size photo goes.
+      if (_tile != null || _full != null) {
+        _freeFull();
         _update();
       }
       return;
@@ -489,7 +512,15 @@ class DevelopCanvasState extends State<DevelopCanvas> {
 
     if (_fullId != p.id) {
       _freeFull();
-      final img = await decodeFull(await photoBytes(p));
+      final ui.Image img;
+      try {
+        img = await decodeFull(await photoBytes(p));
+      } catch (e) {
+        // Not tried again for this photo: the fitted copy stays enlarged.
+        debugPrint('Could not open ${p.name} at full size: $e');
+        _fullFailedId = p.id;
+        return;
+      }
       if (_disposed || c.photo.id != p.id) {
         img.dispose();
         _again = true;
@@ -729,11 +760,14 @@ class _DevelopPainter extends CustomPainter {
     } else {
       // The photo, the full-size part over it, then the layout on top.
       paintComposite(canvas, image, k, g, null, null, scale);
+      // The tile's own pixels per photo pixel (its size was rounded).
+      final sx = t.image.width / t.outer.width;
+      final sy = t.image.height / t.outer.height;
       final src = Rect.fromLTWH(
-        (t.inner.left - t.outer.left) * t.scale,
-        (t.inner.top - t.outer.top) * t.scale,
-        t.inner.width * t.scale,
-        t.inner.height * t.scale,
+        (t.inner.left - t.outer.left) * sx,
+        (t.inner.top - t.outer.top) * sy,
+        t.inner.width * sx,
+        t.inner.height * sy,
       );
       final dst = Rect.fromLTWH(
         (t.inner.left - g.cropX) * scale,

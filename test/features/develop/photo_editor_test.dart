@@ -17,6 +17,7 @@ import 'package:pio_photo_layout/core/store/layout_store_memory.dart';
 import 'package:pio_photo_layout/core/store/preset_store_memory.dart';
 import 'package:pio_photo_layout/core/store/settings_store.dart';
 import 'package:pio_photo_layout/features/develop/develop_canvas.dart';
+import 'package:pio_photo_layout/features/develop/open_photo_editor.dart';
 import 'package:pio_photo_layout/features/develop/photo_editor_controller.dart';
 import 'package:pio_photo_layout/features/develop/photo_editor_screen.dart';
 import 'package:pio_photo_layout/features/home/home_controller.dart';
@@ -206,6 +207,67 @@ Future<double> meanOf(WidgetTester tester) async {
   return sum / n;
 }
 
+/// Records each render's size and placement and hands back a plain copy;
+/// its tiles overlap by 8 px.
+class TileLog extends CpuDeveloper {
+  final calls =
+      <({int w, int h, double scale, Offset origin, Size? fullSize})>[];
+
+  @override
+  Future<ui.Image> develop(
+    ui.Image src,
+    EditSettings s, {
+    ProfileTable? profile,
+    double scale = 1,
+    ui.Offset origin = ui.Offset.zero,
+    ui.Size? fullSize,
+    int lutSize = 33,
+    DevelopStats? stats,
+  }) {
+    calls.add((
+      w: src.width,
+      h: src.height,
+      scale: scale,
+      origin: origin,
+      fullSize: fullSize,
+    ));
+    return copyImage(src);
+  }
+
+  @override
+  int margin(EditSettings s, double scale, {required ui.Size fullSize}) => 8;
+}
+
+/// Home with one 4000x3000 one-pixel checker photo.
+Future<HomeController> checkerHome(WidgetTester tester) {
+  final bytes = checkerPng(4000, 3000);
+  return homeWith(
+    tester,
+    photos: [
+      PickedPhoto(
+        name: 'checker.png',
+        readBytes: () async => bytes,
+        size: bytes.length,
+      ),
+    ],
+  );
+}
+
+/// Twelve Ctrl+scroll notches at the middle of the canvas, in or out.
+Future<void> ctrlScroll(WidgetTester tester, {bool zoomIn = true}) async {
+  final at = tester.getCenter(find.byType(DevelopCanvas));
+  final mouse = TestPointer(7, PointerDeviceKind.mouse);
+  await tester.sendEventToBinding(mouse.hover(at));
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  for (var i = 0; i < 12; i++) {
+    await tester.sendEventToBinding(
+      mouse.scroll(Offset(0, zoomIn ? -300 : 300)),
+    );
+  }
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+  await tester.pump(const Duration(milliseconds: 200));
+}
+
 /// A 1-bit grey PNG of a one-pixel checkerboard.
 Uint8List checkerPng(int w, int h) {
   final stride = (w + 7) ~/ 8;
@@ -338,6 +400,57 @@ void main() {
     await settle(tester);
   });
 
+  etest('a change made during a drag keeps the dragged value', (tester) async {
+    final c = await homeWith(tester, n: 1);
+    final e = editorOn(c, 0);
+    final p = e.photo;
+    await pumpEditor(tester, e);
+    e.beginChange();
+    e.preview(Setting.exposure, 0.8);
+    await tester.runAsync(() => e.setValue(Setting.contrast, 20));
+    expect(c.settingsFor(p)[Setting.exposure], 0.8);
+    expect(c.settingsFor(p)[Setting.contrast], 20);
+    expect(e.changing, isFalse);
+
+    await tester.runAsync(e.undo);
+    expect(c.settingsFor(p)[Setting.exposure], 0.8);
+    expect(c.settingsFor(p)[Setting.contrast], 0);
+    await tester.runAsync(e.undo);
+    expect(c.settingsFor(p)[Setting.exposure], 0);
+    expect(e.canUndo, isFalse, reason: 'exactly two steps');
+    await settle(tester);
+  });
+
+  etest('the editor closes when Home has no photos left', (tester) async {
+    final c = await homeWith(tester, n: 2);
+    setView(tester, const Size(390, 844), 2);
+    await tester.pumpWidget(
+      themed(
+        Builder(
+          builder: (context) => Center(
+            child: CupertinoButton(
+              onPressed: () => openPhotoEditor(context, c, c.readyPhotos.first),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+        Brightness.light,
+      ),
+    );
+    await tester.tap(find.text('Open'));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    await settle(tester);
+    expect(find.byType(PhotoEditorScreen), findsOneWidget);
+
+    await tester.runAsync(c.clearPhotos);
+    await tester.pump(); // the editor closes after this frame
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byType(PhotoEditorScreen), findsNothing);
+    expect(find.text('Open'), findsOneWidget);
+  });
+
   etest('undo after copy to all restores every photo', (tester) async {
     final c = await homeWith(tester);
     final [a, b, d] = c.readyPhotos;
@@ -442,17 +555,7 @@ void main() {
   });
 
   etest('zoom to 100 % shows full-resolution pixels', (tester) async {
-    final bytes = checkerPng(4000, 3000);
-    final c = await homeWith(
-      tester,
-      photos: [
-        PickedPhoto(
-          name: 'checker.png',
-          readBytes: () async => bytes,
-          size: bytes.length,
-        ),
-      ],
-    );
+    final c = await checkerHome(tester);
     final e = editorOn(c, 0);
     await pumpEditor(tester, e);
     expect(
@@ -461,15 +564,7 @@ void main() {
       reason: 'fitted, the checker is grey',
     );
 
-    final at = tester.getCenter(find.byType(DevelopCanvas));
-    final mouse = TestPointer(7, PointerDeviceKind.mouse);
-    await tester.sendEventToBinding(mouse.hover(at));
-    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-    for (var i = 0; i < 12; i++) {
-      await tester.sendEventToBinding(mouse.scroll(const Offset(0, -300)));
-    }
-    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-    await tester.pump(const Duration(milliseconds: 200));
+    await ctrlScroll(tester);
     final canvas = canvasState(tester);
     expect(canvas.zoomPercent, 100);
     await settle(tester, until: () => canvas.showsFullSize);
@@ -477,6 +572,45 @@ void main() {
       await contrastOf(tester),
       greaterThan(0.9),
       reason: 'every screen pixel is one photo pixel',
+    );
+
+    // Back at fit, the full-size decode is let go.
+    await ctrlScroll(tester, zoomIn: false);
+    await settle(tester);
+    expect(canvas.showsFullSize, isFalse);
+    expect(canvas.holdsFullSize, isFalse);
+  });
+
+  etest('at 100 % the visible part is developed in place in the whole photo', (
+    tester,
+  ) async {
+    final c = await checkerHome(tester);
+    await tester.runAsync(
+      () => c.setLook(c.look.withPhotoPatch(c.photos.first.id, exposure(0.5))),
+    );
+    final log = TileLog();
+    final e = editorOn(c, 0, developer: log);
+    await pumpEditor(tester, e);
+    await ctrlScroll(tester);
+    final canvas = canvasState(tester);
+    await settle(tester, until: () => canvas.showsFullSize);
+
+    final tiles = log.calls.where((x) => x.scale == 1).toList();
+    expect(tiles, isNotEmpty);
+    final t = tiles.last;
+    expect(t.fullSize, const Size(4000, 3000));
+    // 780 device pixels are visible across, around the photo's middle,
+    // plus the 8 px margin on each side.
+    final across = (tester.getSize(find.byType(DevelopCanvas)).width * 2)
+        .round();
+    expect(t.w, inInclusiveRange(across + 16, across + 18));
+    expect(t.origin.dx, closeTo(2000 - across / 2 - 8, 2));
+    expect(t.origin.dy, greaterThan(0));
+    expect(t.origin.dy + t.h, lessThan(3000));
+    expect(
+      await contrastOf(tester),
+      greaterThan(0.9),
+      reason: 'the margin is cut away again',
     );
   });
 

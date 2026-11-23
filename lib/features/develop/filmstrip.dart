@@ -6,6 +6,7 @@ import '../../ui/app_theme.dart';
 import '../../ui/previews.dart';
 import '../../ui/widgets/pressable.dart';
 import 'photo_editor_controller.dart';
+import 'select_builder.dart';
 
 /// Thumbnail size and gap in the filmstrip.
 const double kFilmThumb = 56;
@@ -45,6 +46,22 @@ class _FilmstripState extends State<Filmstrip> {
 
   @override
   Widget build(BuildContext context) {
+    final c = widget.controller;
+    // Rebuilt for another photo or a new thumbnail, not for slider ticks.
+    return SelectBuilder(
+      listenable: c,
+      select: () => Object.hashAll([
+        c.photo.id,
+        for (final p in c.photos) ...[
+          p.id,
+          identityHashCode(p.developed ?? p.preview),
+        ],
+      ]),
+      builder: _strip,
+    );
+  }
+
+  Widget _strip(BuildContext context) {
     final colors = AppColors.of(context);
     final c = widget.controller;
     final photos = c.photos;
