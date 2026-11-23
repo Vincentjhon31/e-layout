@@ -40,7 +40,10 @@ void main() {
       CurvePoint(115, 126),
       CurvePoint(255, 255),
     ]);
-    expect(p.patch.curves.containsKey(CurveChannel.red), isFalse);
+    expect(p.patch.curves[CurveChannel.red], const [
+      CurvePoint(0, 0),
+      CurvePoint(255, 255),
+    ]);
     expect(p.patch.profile, const ProfileRef(lookUuid, 'Test Look', 0.5));
     expect(p.patch.grayscale, isNull);
     expect(p.patch.extras, {
@@ -136,7 +139,11 @@ void main() {
       CurvePoint(100, 120),
       CurvePoint(255, 255),
     ]);
-    expect(p.patch.curves.containsKey(CurveChannel.blue), isFalse);
+    expect(p.patch.curves[CurveChannel.blue], const [
+      CurvePoint(0, 0),
+      CurvePoint(255, 255),
+    ]);
+    expect(p.patch.curves.containsKey(CurveChannel.green), isFalse);
     expect(p.patch.profile, isNull);
     expect(r.line, 'Imported "Old Style".');
   });
@@ -331,16 +338,41 @@ void main() {
     expect(r.line, 'No Lightroom presets found in these files.');
   });
 
-  test('a look whose table does not match its id is skipped', () {
+  test('a look whose table cannot be read is reported', () {
     final t = warmTableText();
-    final r = importPresetFiles([
-      f(
-        'look.xmp',
-        lookXmp(tableId: '00000000000000000000000000000000', tableText: t.text),
-      ),
-    ]);
+    final bad = lookXmp(
+      tableId: '00000000000000000000000000000000',
+      tableText: t.text,
+    );
+    final r = importPresetFiles([f('look.xmp', bad)]);
     expect(r.profiles, isEmpty);
-    expect(r.line, 'No Lightroom presets found in these files.');
+    expect(r.line, "The profile \"Test Look\" can't be read.");
+    // The preset that points at it gets no missing-profile line.
+    final both = importPresetFiles([
+      f('look.xmp', bad),
+      f('a.xmp', presetXmp()),
+    ]);
+    expect(
+      both.line,
+      "Imported \"Soft Test\". The profile \"Test Look\" can't be read.",
+    );
+    expect(both.presets.single.patch.profile!.id, lookUuid);
+  });
+
+  test('same preset in xmp and lrtemplate keeps the xmp one', () {
+    final r = importPresetFiles([
+      f('old.lrtemplate', lrtemplate(title: 'Soft Test')),
+      f('a.xmp', presetXmp(look: null)),
+    ]);
+    expect(r.presets, hasLength(1));
+    expect(r.presets.single.id, presetUuid);
+    expect(r.line, 'Imported "Soft Test".');
+    // A different name is kept.
+    final two = importPresetFiles([
+      f('old.lrtemplate', lrtemplate()),
+      f('a.xmp', presetXmp(look: null)),
+    ]);
+    expect(two.presets, hasLength(2));
   });
 
   test('a non-stubbed look with its own table also yields a profile', () {

@@ -95,17 +95,30 @@ void _read(String name, Uint8List bytes, List<_Found> out, int depth) {
 
 String _key(String id) => id.trim().toUpperCase();
 
+/// A profile that was found but whose table could not be read.
+class _Unreadable {
+  _Unreadable(this.id, this.name);
+  final String id;
+  final String name;
+}
+
 Profile? _profileFrom({
+  required List<_Unreadable> bad,
   required String id,
   required String name,
   required String? tableId,
   required String? tableText,
 }) {
-  if (tableId == null || tableText == null) return null;
+  final key = id.isEmpty ? (tableId ?? '') : id;
+  if (tableId == null || tableText == null) {
+    bad.add(_Unreadable(key, name));
+    return null;
+  }
   try {
     final table = decodeAdobeTable(tableText, fingerprint: tableId);
-    return Profile(id: id.isEmpty ? tableId : id, name: name, table: table);
+    return Profile(id: key, name: name, table: table);
   } on FormatException {
+    bad.add(_Unreadable(key, name));
     return null;
   }
 }
@@ -124,6 +137,7 @@ ImportResult importPresetFiles(
 
   // Profiles first, so presets can link to them whatever the file order.
   final profiles = <String, Profile>{};
+  final unreadable = <_Unreadable>[];
   void addProfile(Profile? p) {
     if (p != null) profiles.putIfAbsent(_key(p.id), () => p);
   }
@@ -134,6 +148,7 @@ ImportResult importPresetFiles(
       final id = p.fields['RGBTable'];
       addProfile(
         _profileFrom(
+          bad: unreadable,
           id: p.id ?? '',
           name: (p.name ?? '').isEmpty ? _stem(f.fileName) : p.name!,
           tableId: id,
@@ -144,6 +159,7 @@ ImportResult importPresetFiles(
       final l = p.look!;
       addProfile(
         _profileFrom(
+          bad: unreadable,
           id: l.id,
           name: l.name,
           tableId: l.tableId,
@@ -169,6 +185,21 @@ ImportResult importPresetFiles(
     return null;
   }
 
+  bool isBad(LookInfo l) => unreadable.any(
+    (u) =>
+        (l.id.isNotEmpty && _key(u.id) == _key(l.id)) ||
+        (l.name.isNotEmpty &&
+            u.name.trim().toLowerCase() == l.name.trim().toLowerCase()),
+  );
+  String nameOf(_Found f) =>
+      (f.parsed.name ?? '').isEmpty ? _stem(f.fileName) : f.parsed.name!;
+  bool isTemplate(_Found f) => f.fileName.toLowerCase().endsWith('.lrtemplate');
+  // The same preset in .xmp/.dng and .lrtemplate: keep the .xmp/.dng one.
+  final modernNames = {
+    for (final f in found)
+      if (!f.parsed.isLook && !isTemplate(f)) nameOf(f).trim().toLowerCase(),
+  };
+
   final presets = <Preset>[];
   final seen = <String>{};
   final notCarried = <String>{};
@@ -179,6 +210,9 @@ ImportResult importPresetFiles(
   for (final f in found) {
     final p = f.parsed;
     if (p.isLook) continue;
+    if (isTemplate(f) && modernNames.contains(nameOf(f).trim().toLowerCase())) {
+      continue;
+    }
     final given = p.id?.trim() ?? '';
     final id = given.isEmpty ? _randomId() : given;
     if (!seen.add(_key(id))) continue; // same UUID twice: one preset
@@ -197,7 +231,7 @@ ImportResult importPresetFiles(
         grayscale: patch.grayscale,
         extras: patch.extras,
       );
-      if (match == null) {
+      if (match == null && !isBad(look)) {
         needs.add((
           (p.name ?? '').isEmpty ? _stem(f.fileName) : p.name!,
           look.name.isEmpty ? look.id : look.name,
@@ -231,7 +265,11 @@ ImportResult importPresetFiles(
   final profileList = profiles.values.toList();
   final b = StringBuffer();
   if (presets.isEmpty && profileList.isEmpty) {
-    b.write('No Lightroom presets found in these files.');
+    if (unreadable.isEmpty) {
+      b.write('No Lightroom presets found in these files.');
+    } else {
+      b.write(_cantRead(unreadable).trimLeft());
+    }
   } else {
     final parts = <String>[];
     if (presets.length == 1) {
@@ -256,6 +294,7 @@ ImportResult importPresetFiles(
         'it will be picked up.',
       );
     }
+    b.write(_cantRead(unreadable));
     if (older) {
       b.write(
         ' Made for an older Lightroom, so it may look a little different.',
@@ -267,4 +306,12 @@ ImportResult importPresetFiles(
     profiles: List.unmodifiable(profileList),
     line: b.toString(),
   );
+}
+
+String _cantRead(List<_Unreadable> bad) {
+  final seen = <String>{};
+  return [
+    for (final u in bad)
+      if (seen.add(_key(u.id))) " The profile \"${u.name}\" can't be read.",
+  ].join();
 }

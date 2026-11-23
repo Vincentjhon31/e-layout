@@ -82,8 +82,6 @@ bool _nonZero(CrsFields f, String name) {
   return v != null && v != 0;
 }
 
-const _identity = [CurvePoint(0, 0), CurvePoint(255, 255)];
-
 List<CurvePoint>? _curve(List<String>? items) {
   if (items == null) return null;
   final pts = <CurvePoint>[];
@@ -96,9 +94,6 @@ List<CurvePoint>? _curve(List<String>? items) {
     pts.add(CurvePoint(x.round().clamp(0, 255), y.round().clamp(0, 255)));
   }
   if (pts.length < 2) return null;
-  if (pts.length == 2 && pts[0] == _identity[0] && pts[1] == _identity[1]) {
-    return null; // a straight line: no curve
-  }
   return pts;
 }
 
