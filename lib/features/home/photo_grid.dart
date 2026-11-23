@@ -22,6 +22,7 @@ class PhotoGrid extends StatelessWidget {
     required this.onOpen,
     required this.onRemove,
     this.enabled = true,
+    this.hasOwnChanges,
   });
 
   final List<PhotoItem> photos;
@@ -31,30 +32,36 @@ class PhotoGrid extends StatelessWidget {
   final ValueChanged<PhotoItem> onRemove;
   final bool enabled;
 
+  /// True for a photo with changes of its own (it gets a dot).
+  final bool Function(PhotoItem photo)? hasOwnChanges;
+
   @override
   Widget build(BuildContext context) {
     return SliverPadding(
       padding: const EdgeInsets.symmetric(horizontal: AppMetrics.gutter),
-      sliver: SliverLayoutBuilder(builder: (context, constraints) => SliverGrid(
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: gridColumns(constraints.crossAxisExtent),
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
+      sliver: SliverLayoutBuilder(
+        builder: (context, constraints) => SliverGrid(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: gridColumns(constraints.crossAxisExtent),
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+          ),
+          delegate: SliverChildBuilderDelegate((context, i) {
+            if (i == 0) return _AddCell(onTap: enabled ? onAdd : null);
+            final p = photos[i - 1];
+            return _PhotoCell(
+              key: ValueKey(p.id),
+              photo: p,
+              layout: layout,
+              ownChanges: hasOwnChanges?.call(p) ?? false,
+              onTap: enabled && p.status == PhotoStatus.ready
+                  ? () => onOpen(p)
+                  : null,
+              onRemove: enabled ? () => onRemove(p) : null,
+            );
+          }, childCount: photos.length + 1),
         ),
-        delegate: SliverChildBuilderDelegate((context, i) {
-          if (i == 0) return _AddCell(onTap: enabled ? onAdd : null);
-          final p = photos[i - 1];
-          return _PhotoCell(
-            key: ValueKey(p.id),
-            photo: p,
-            layout: layout,
-            onTap: enabled && p.status == PhotoStatus.ready
-                ? () => onOpen(p)
-                : null,
-            onRemove: enabled ? () => onRemove(p) : null,
-          );
-        }, childCount: photos.length + 1),
-      )),
+      ),
     );
   }
 }
@@ -99,12 +106,14 @@ class _PhotoCell extends StatelessWidget {
     super.key,
     required this.photo,
     required this.layout,
+    this.ownChanges = false,
     this.onTap,
     this.onRemove,
   });
 
   final PhotoItem photo;
   final LayoutItem? layout;
+  final bool ownChanges;
   final VoidCallback? onTap;
   final VoidCallback? onRemove;
 
@@ -144,7 +153,7 @@ class _PhotoCell extends StatelessWidget {
         body = CustomPaint(
           size: Size.infinite,
           painter: CompositePainter(
-            image: photo.preview!,
+            image: photo.developed ?? photo.preview!,
             photoWidth: photo.width,
             photoHeight: photo.height,
             doc: layout?.doc,
@@ -169,6 +178,26 @@ class _PhotoCell extends StatelessWidget {
             child: body,
           ),
         ),
+        if (ownChanges && photo.status == PhotoStatus.ready)
+          Positioned(
+            top: 6,
+            left: 6,
+            child: IgnorePointer(
+              child: Container(
+                key: const Key('own-changes-dot'),
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: c.accent,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: const Color(0xCCFFFFFF),
+                    width: 0.5,
+                  ),
+                ),
+              ),
+            ),
+          ),
         if (onRemove != null)
           Positioned(
             top: -4,

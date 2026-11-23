@@ -699,6 +699,23 @@ class HomeController extends ChangeNotifier {
     await _saveManifest();
   }
 
+  /// [src] (a preview of a photo [srcPhotoWidth] pixels wide) with [preset]
+  /// applied, at a fast table size, for the picker's thumbnails. The caller
+  /// owns the result. Null when editing is not available.
+  Future<ui.Image?> developPreview(ui.Image src, int srcPhotoWidth, Preset preset) async {
+    final dev = developer;
+    if (dev == null || srcPhotoWidth <= 0) return null;
+    final s = EditSettings.resolve([preset.patch]);
+    return dev.develop(
+      src,
+      s,
+      profile: profileFor(s),
+      scale: src.width / srcPhotoWidth,
+      fullSize: ui.Size(src.width.toDouble(), src.height.toDouble()),
+      lutSize: 17,
+    );
+  }
+
   /// Makes [p] the shared preset (null for none); single-photo changes stay.
   Future<void> choosePresetForAll(Preset? p) => setLook(look.withPresetForAll(p?.patch, p?.name));
 
