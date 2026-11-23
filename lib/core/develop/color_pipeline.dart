@@ -20,7 +20,12 @@ import 'settings.dart';
 /// (notes 6.2: the pivot is `m = 0.18^(1/2.2)` in the gamma 2.2 tone domain).
 const double kContrastPivot = 0.18;
 
-const double _grey = 0.18; // CL develop/src/tone.rs:11
+const double _grey = 0.18;
+
+/// The tone map's gamut blend starts at this brightest-channel value and
+/// reaches the full desaturation at [_gamutFull].
+const double _gamutKnee = 0.8;
+const double _gamutFull = 3.0;
 
 /// sRGB decode (LC crates/color/src/transfer.rs:5-13).
 double srgbToLinear(double v) =>
@@ -707,9 +712,15 @@ class ColorPipeline {
     final o = _tone(yl);
     final k = o / yl;
     var dr = _r * k, dg = _g * k, db = _bb * k;
+    // Gamut handling: blend toward the luminance-preserving grey by a smooth
+    // function of the brightest channel, starting below 1. LightCraft uses a
+    // hard branch that brings the maximum exactly to 1 (finish.rs:482-486);
+    // that is a near-step when the tone output is close to 1, because the
+    // blend needed grows like 1/(mx - o). Here the blend is bounded and the
+    // final clamp takes what is left, so the result is continuous.
     final mx = math.max(dr, math.max(dg, db));
-    if (mx > 1) {
-      final t = _clamp01((mx - 1) / math.max(mx - o, 1e-6));
+    if (mx > _gamutKnee) {
+      final t = _smooth(_gamutKnee, _gamutFull, mx);
       dr += (o - dr) * t;
       dg += (o - dg) * t;
       db += (o - db) * t;
@@ -733,7 +744,7 @@ class ColorPipeline {
       final dh = w0 * _hueShift[i] + s * _hueShift[j];
       final ds = w0 * _satScale[i] + s * _satScale[j];
       final dl = w0 * _lumShift[i] + s * _lumShift[j];
-      final cw = math.min(c / 0.12, 1.0);
+      final cw = _smooth(0.0, 0.12, c);
       h += dh * cw;
       c *= math.max(1 + ds, 0);
       l += dl * cw * math.sqrt(math.max(l, 0.05));
