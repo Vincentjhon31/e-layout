@@ -8,6 +8,7 @@ import '../../ui/widgets/app_button.dart';
 import '../../ui/widgets/app_card.dart';
 import '../../ui/widgets/page_header.dart';
 import 'changelog_screen.dart';
+import 'licences_screen.dart';
 import 'update_controller.dart';
 import 'update_dialogs.dart';
 import 'whats_new.dart';
@@ -88,6 +89,12 @@ class _AboutScreenState extends State<AboutScreen> {
                               detail: kSiteUrl.host,
                               trailing: Icon(CupertinoIcons.arrow_up_right_square, size: 18, color: c.secondary),
                               onTap: () => unawaited(openExternal(kDownloadPageUrl)),
+                            ),
+                            AppRow(
+                              label: 'Licences',
+                              trailing: Icon(CupertinoIcons.chevron_forward, size: 16, color: c.secondary),
+                              onTap: () => Navigator.of(context)
+                                  .push(CupertinoPageRoute<void>(builder: (_) => const LicencesScreen())),
                             ),
                           ]),
                           const SizedBox(height: 24),

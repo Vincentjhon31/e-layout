@@ -20,6 +20,11 @@ void main() {
   ];
   const coreFiles = [
     'lib/core/',
+    'lib/core/develop/',
+    'lib/core/presets/',
+    'lib/core/store/preset_store',
+    'lib/core/store/batch_store',
+    'lib/features/develop/',
     'lib/features/home/home_controller.dart',
     'lib/features/home/export_job.dart',
     'lib/features/editor/',

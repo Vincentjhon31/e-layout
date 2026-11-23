@@ -136,6 +136,24 @@ void main() {
     await shot('changelog_light');
   });
 
+  testWidgets('Licences lists the photo editing licences and shows their text', (tester) async {
+    await show(tester, AboutScreen(updates: make(updater: FakeUpdater(release: null))));
+    await tester.ensureVisible(find.text('Licences'));
+    await tester.pump();
+    await tester.tap(find.text('Licences'));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('LightCraft'), findsOneWidget);
+    expect(find.text('Adobe DNG SDK'), findsOneWidget);
+    expect(find.text('Hash without Sine'), findsOneWidget);
+    await tester.tap(find.text('LightCraft'));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 100)));
+    await tester.pump();
+    expect(find.textContaining('ArtCraft Team'), findsWidgets);
+  });
+
   testWidgets('the What\'s new sheet', (tester) async {
     await show(tester, const Center(child: Text('home')));
     unawaited(showWhatsNewSheet(tester.element(find.text('home')), parseWhatsNew(notes)));

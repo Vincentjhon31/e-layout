@@ -7,6 +7,13 @@ Write short, plain bullets that start with "- ", one idea each, for the people w
 Never mention internal details such as servers, hosting, keys, admin tools or file paths.
 -->
 
+## 1.1.0
+
+- Edit your photos inside e-Layout: light, colour, curves, effects, sharpening and noise reduction.
+- Put one preset on every photo, then change single photos when one needs it.
+- Import your Lightroom presets (.xmp, .dng, .lrtemplate), including their profiles, and share your own presets as a file.
+- Your photos and their edits stay in e-Layout until you clear them.
+
 ## 1.0.1
 
 - Fixed saving photos in the browser version.
