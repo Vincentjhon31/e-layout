@@ -64,6 +64,33 @@ void main() {
     CurvePoint(255, 255),
   ];
 
+  test('size-33 table matches mild settings within 2/255 (primary guard)', () {
+    final p = ColorPipeline(
+      settings(values: {Setting.exposure: 0.3, Setting.contrast: 15}),
+    );
+    final lut = bakeLut(p, 33);
+    final rnd = Random(2);
+    // Clipped outputs (about 28% here, from the +0.3 EV) are checked too:
+    // with mild settings the clamp kink is small enough to stay within 2/255,
+    // so every colour is held to the bound, not just the unclipped ones.
+    var checked = 0;
+    for (var i = 0; i < 500; i++) {
+      final r = rnd.nextDouble(), g = rnd.nextDouble(), b = rnd.nextDouble();
+      final want = p.apply(r, g, b);
+      final got = lut.sample(r, g, b);
+      checked++;
+      final e =
+          [
+            (want.$1 - got.$1).abs(),
+            (want.$2 - got.$2).abs(),
+            (want.$3 - got.$3).abs(),
+          ].reduce(max) *
+          255;
+      expect(e, lessThanOrEqualTo(2), reason: 'colour $r $g $b');
+    }
+    expect(checked, greaterThanOrEqualTo(450));
+  });
+
   test('size-33 table matches the pipeline within 2/255 (full mix)', () {
     final p = ColorPipeline(
       settings(
@@ -93,8 +120,8 @@ void main() {
       worstAll = max(worstAll, e);
       // A hard clamp at 0 or 255 is a slope kink: a table cannot follow it
       // closer than a few levels, in the shader as here. Colours whose output
-      // sits on the gamut edge (clamped, or within half a level of it) are checked only for continuity
-      // (the sweep test below), not for the 2/255 bound.
+      // sits on the gamut edge (clamped, or within half a level of it) are
+      // checked only for continuity (the sweep test below), not for 2/255.
       final near = [
         want.$1,
         want.$2,
@@ -111,6 +138,7 @@ void main() {
       'full mix: worst ${worstAll.toStringAsFixed(1)}/255, '
       '$skipped/500 near the gamut edge',
     );
+    expect(worstAll, lessThanOrEqualTo(8));
   });
 
   test('contrast has no steps near the gamut boundary', () {

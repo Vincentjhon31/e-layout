@@ -18,6 +18,7 @@ class Lut3d {
   /// Input is clamped to 0..1; output is 0..1.
   (double, double, double) sample(double r, double g, double b) {
     final n1 = size - 1;
+    if (n1 == 0) return (rgba[0] / 255, rgba[1] / 255, rgba[2] / 255);
     double clampScale(double v) =>
         v > 0 ? (v < 1 ? v * n1 : n1.toDouble()) : 0.0;
     final fr = clampScale(r), fg = clampScale(g), fb = clampScale(b);
@@ -25,7 +26,6 @@ class Lut3d {
     if (r0 >= n1) r0 = n1 - 1;
     if (g0 >= n1) g0 = n1 - 1;
     if (b0 >= n1) b0 = n1 - 1;
-    if (n1 == 0) return (rgba[0] / 255, rgba[1] / 255, rgba[2] / 255);
     final tr = fr - r0, tg = fg - g0, tb = fb - b0;
     final d = rgba;
     double slice(int bi, int c) {
