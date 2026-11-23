@@ -378,17 +378,20 @@ void main() {
       );
     });
 
-    etest('save preset sheet', (tester) async {
-      await open(tester, panel: false);
-      await openMenu(tester);
-      await tester.tap(find.text('Save as preset'));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(CupertinoTextField), 'Sunny day');
-      await tester.pump();
-      await expectLater(
-        find.byType(SavePresetSheet),
-        matchesGoldenFile('goldens/save_preset_sheet.png'),
-      );
-    });
+    for (final b in Brightness.values) {
+      final tag = b == Brightness.dark ? '_dark' : '';
+      etest('save preset sheet$tag', (tester) async {
+        await open(tester, b: b, panel: false);
+        await openMenu(tester);
+        await tester.tap(find.text('Save as preset'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(CupertinoTextField), 'Sunny day');
+        await tester.pump();
+        await expectLater(
+          find.byType(SavePresetSheet),
+          matchesGoldenFile('goldens/save_preset_sheet$tag.png'),
+        );
+      });
+    }
   });
 }

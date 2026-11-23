@@ -67,44 +67,49 @@ class _CopyToAllSheetState extends State<CopyToAllSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            decoration: BoxDecoration(
-              color: colors.cardIn(context),
-              borderRadius: BorderRadius.circular(AppMetrics.cardRadius),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              children: [
-                for (final g in ToolGroup.values) ...[
-                  _GroupRow(
-                    label: _kGroupNames[g]!,
-                    on: _groups.contains(g),
-                    onPressed: () => setState(() {
-                      if (!_groups.remove(g)) _groups.add(g);
-                    }),
+          Builder(
+            builder: (context) => Container(
+              decoration: BoxDecoration(
+                color: colors.cardIn(context),
+                borderRadius: BorderRadius.circular(AppMetrics.cardRadius),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                children: [
+                  for (final g in ToolGroup.values) ...[
+                    _GroupRow(
+                      label: _kGroupNames[g]!,
+                      on: _groups.contains(g),
+                      onPressed: () => setState(() {
+                        if (!_groups.remove(g)) _groups.add(g);
+                      }),
+                    ),
+                    Container(height: 0.5, color: colors.separator),
+                  ],
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(minHeight: 52),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Keep changes made on single photos',
+                              style: AppText.body.copyWith(color: colors.text),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          CupertinoSwitch(
+                            value: _keepSingle,
+                            activeTrackColor: colors.accent,
+                            onChanged: (v) => setState(() => _keepSingle = v),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  Container(height: 0.5, color: colors.separator),
                 ],
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Keep changes made on single photos',
-                          style: AppText.body.copyWith(color: colors.text),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      CupertinoSwitch(
-                        value: _keepSingle,
-                        activeTrackColor: colors.accent,
-                        onChanged: (v) => setState(() => _keepSingle = v),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
           const SizedBox(height: 20),

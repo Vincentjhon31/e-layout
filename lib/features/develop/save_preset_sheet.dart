@@ -68,22 +68,26 @@ class _SavePresetSheetState extends State<SavePresetSheet> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          CupertinoTextField(
-            controller: _name,
-            autofocus: true,
-            placeholder: 'Preset name',
-            placeholderStyle: AppText.body.copyWith(color: colors.secondary),
-            // Stops typing at the limit without a counter.
-            inputFormatters: [LengthLimitingTextInputFormatter(kPresetNameMax)],
-            textCapitalization: TextCapitalization.sentences,
-            textInputAction: TextInputAction.done,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-            style: AppText.body.copyWith(color: colors.text),
-            decoration: BoxDecoration(
-              color: colors.raised,
-              borderRadius: BorderRadius.circular(AppMetrics.cardRadius),
+          Builder(
+            builder: (context) => CupertinoTextField(
+              controller: _name,
+              autofocus: true,
+              placeholder: 'Preset name',
+              placeholderStyle: AppText.body.copyWith(color: colors.secondary),
+              // Stops typing at the limit without a counter.
+              inputFormatters: [
+                LengthLimitingTextInputFormatter(kPresetNameMax),
+              ],
+              textCapitalization: TextCapitalization.sentences,
+              textInputAction: TextInputAction.done,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+              style: AppText.body.copyWith(color: colors.text),
+              decoration: BoxDecoration(
+                color: colors.cardIn(context),
+                borderRadius: BorderRadius.circular(AppMetrics.cardRadius),
+              ),
+              clearButtonMode: OverlayVisibilityMode.editing,
             ),
-            clearButtonMode: OverlayVisibilityMode.editing,
           ),
           const SizedBox(height: 16),
           ListenableBuilder(
