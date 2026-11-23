@@ -176,8 +176,9 @@ From `LC crates/pipeline/src/lib.rs:7-14` and `render_impl` (`lib.rs:721-823`):
    clarity, local adjustments (masks).
 3. **Tone map**: contrast, whites, blacks on luminance; highlight desaturation.
 4. **Colour**: vibrance, saturation, mixer, grading, B&W (OkLCh).
-5. **Display**: gamut map to the output space, encode, tone curves (parametric then point), vignette,
-   grain. (Vignette is actually before the encode in the code; see 5.2.)
+5. **Display**: vignette (display-linear), gamut map to the output space, sRGB encode, tone curves
+   (parametric then point), grain. (The upstream doc comment lists vignette after the curves; the code, and
+   the table in 5.2, put it before the encode.)
 
 The docs text in `lib.rs:13-14` lists "tone curves, vignette, grain" at the end, but the code order
 is the one in 5.2 and is the one to follow.
@@ -333,9 +334,12 @@ process:
    reduced plane, `step = clamp(floor(sigma/3), 1, 16)` (`local.rs:314-324, 491-493`).
 4. If neither Highlights nor Shadows is set (nor a mask's), the base plane is not built and `base = l`.
 
-Per-pixel-bakeable **proposal, not from LightCraft**: for a 3D LUT, set `base = log2(Ypixel/0.18)`
+Per-pixel-bakeable **proposal, not from LightCraft** (chosen for Phase 1): for a 3D LUT, set `base = log2(Ypixel/0.18)`
 of the exposed pixel itself (the limit `sigma -> 0`). That keeps LightCraft's weight curves and strengths
-but loses the edge-aware halo-free behaviour. If a shader later has a spare blurred plane, replace
+but loses the edge-aware halo-free behaviour. The shadow weight spans a very wide range
+(`smooth(-4.8, 0.3, base)`, about 5 stops), so a per-pixel bake looks harsher than LightCraft's, where the
+blurred base smooths it. Porters should tune the **strength** (the 1.7 factors), not the curve shape.
+If a shader later has a spare blurred plane, replace
 `Ypixel` by the blurred luminance (a Gaussian approximation of the base).
 
 Whites, Blacks and Contrast also have **local-mask versions** in this function
@@ -363,8 +367,9 @@ values hold for Rec.2020, since OkLab hue depends on the colour):
 | Purple | 270 | -1.1559 | 293.77 |
 | Magenta | 315 | -0.2838 | 343.74 |
 
-(These numbers are my computation with the published OkLab sRGB matrices, not read from the Rust
-source; the Rust computes them at start-up. They are in increasing hue order going round the circle,
+**Porters must compute the hue centres at start-up in Dart exactly as the Rust does** (HSV hue to sRGB,
+linearise, convert, OkLab hue; section 3). Use this table only as test vectors; it is my computation with
+the published OkLab sRGB matrices, **not verified against the Rust** (the Rust computes them at start-up. They are in increasing hue order going round the circle,
 which `band_weights` relies on.)
 
 **Falloff** (`band_weights`, `colorops.rs:75-94`): a partition of unity of raised-cosine blends
@@ -400,7 +405,8 @@ C *= max(1 + ds, 0)
 L += dl * chroma_w * sqrt(max(L, 0.05))
 ```
 
-Test vectors (my Python transliteration, not run against Rust): `band_weights(1.2 rad)` =
+Test vectors (my Python transliteration, not run against Rust; compute the weights in Dart from the
+start-up hue centres): `band_weights(1.2 rad)` =
 orange 0.8182, yellow 0.1818, others 0; `band_weights(-2.0 rad)` = aqua 0.1655, blue 0.8345.
 
 ### 6.5 Vibrance and Saturation
@@ -417,7 +423,7 @@ if vib != 0:
 if sat != 0:   C *= max(1 + sat, 0)
 ```
 
-`Saturation = -100` gives `C = 0` (grey). Test vector (my transliteration): `vib = +0.5`, `C = 0.05`,
+`Saturation = -100` gives `C = 0` (grey). Test vector (my transliteration, not verified against Rust): `vib = +0.5`, `C = 0.05`,
 `h = 0` gives `C = 0.06784`; at `h = skinHue` `0.05717`; `C = 0.2` gives `0.20099`.
 
 ### 6.6 B&W mix and B&W treatment
@@ -465,7 +471,7 @@ rgb = oklab_to_linear(lab)
 ```
 
 The wheels add a colour vector to OkLab a and b; they do not rotate the existing hue. Test vectors
-(transliteration; blending 0.5, balance 0): at `L` = 0.1, 0.3, 0.5, 0.7, 0.9 the (shadow, mid,
+(my transliteration, not verified against Rust; blending 0.5, balance 0): at `L` = 0.1, 0.3, 0.5, 0.7, 0.9 the (shadow, mid,
 highlight) weights are (1, 0, 0), (0.648, 0.352, 0), (0.104, 0.792, 0.104), (0, 0.352, 0.648), (0, 0, 1).
 
 ### 6.8 Point Color (not in the Task 4 list, noted for completeness)
@@ -485,7 +491,7 @@ mapping from the relative slider `r` to Kelvin (`CL develop-model/src/crs.rs:154
 
 ```text
 K(r) = 1e6 / ( 1e6/6500  -  0.8 * clamp(r, -100, 100) )        // a mired shift around 6500 K
-r = +50 -> 8783.8 K,   r = -50 -> 5158.7 K                      // positive r warms the picture
+r = +50 -> 8783.8 K,   r = -50 -> 5158.7 K                      // higher K = bluer assumed white = warmer correction (derived)
 ```
 
 (This is the mapping LightCraft uses to read `crs:IncrementalTemperature`; I read no other slider
@@ -505,9 +511,10 @@ pixel       = max(M * pixel, 0)                // before exposure
 ```
 
 If `(t, tint)` equals the as-shot values (or mode is As Shot), no matrix is applied (`local.rs:73-75`).
-The sign of tint in LightCraft's help text: "negative adds green, positive adds magenta"
-(`settings.rs:329-330`), because a positive tint moves the assumed source white above the locus
-(greener) and the correction removes it.
+Sign reasoning (my derivation from the matrix above, not a citation): the matrix maps the assumed source
+white to neutral, so a higher Kelvin value (bluer assumed white) gives a warmer correction, and a positive
+tint (assumed white shifted towards green) gives a magenta correction. `settings.rs:329-330` has a help
+comment on tint direction; check it against a test image before wiring the slider direction.
 
 `temp_tint_to_xy` (`CL color-transform/src/cct.rs:26-94`):
 
@@ -551,17 +558,18 @@ s0 = clamp(splitShadows/100, 0, 1)
 s1 = clamp(splitMid/100,    s0, 1)
 s2 = clamp(splitHighlights/100, s1, 1)
 regions = [(0, s0, a0), (s0, s1, a1), (s1, s2, a2), (s2, 1, a3)]      // a_i = region amount, -100..100
-for i in 0..1023:   x = i/1023
+prev = 0
+for i in 0..=1023:   x = i/1023                  // 1024 entries; i = 0 gives x = 0, y = 0
     d = 0
     for (lo, hi, amt) in regions, amt != 0:
         ctr = (lo+hi)/2;  half = (hi - lo)*0.75 + 0.05
         t   = clamp((x - ctr)/half, -1, 1)
         d  += (amt/100) * 0.22 * (0.5 + 0.5*cos(PI*t))           // one cosine bump per region
     y = clamp(x + d * 4x(1-x), 0, 1)                              // 4x(1-x) pins 0 and 1
-    lut[i] = max(y, lut[i-1])                                      // forced monotone
+    prev   = max(prev, y);  lut[i] = prev                          // forced monotone; at i = 0, prev = 0 so lut[0] = 0
 ```
 
-Test vectors (transliteration): `shadows = +50`, splits default: at x = 0, 0.1, 0.25, 0.5, 0.75, 1 the
+Test vectors (my transliteration, not verified against Rust): `shadows = +50`, splits default: at x = 0, 0.1, 0.25, 0.5, 0.75, 1 the
 output is 0, 0.13853, 0.28784, 0.5, 0.75, 1. `darks = +30, lights = -50`: 0, 0.1, 0.27271, 0.47982,
 0.71216, 1.
 
@@ -721,7 +729,7 @@ delta     += sharpen * gain * term
 `gain = 1 + (ratio - 1) * blend`; 0 when `raw <= 0` or not finite. `native_long` is the original
 photo's long edge, so a preview gets the export's sharpening scaled down. If e-Layout edits at one
 resolution, `ppl = native_long` and `raw_sigma = Radius`.
-Test vector (transliteration): `limit(Detail 25) = 0.07977`; `term(det = 0.1, Detail 25, Masking 0) = 0.3106`.
+Test vector (my transliteration, not verified against Rust): `limit(Detail 25) = 0.07977`; `term(det = 0.1, Detail 25, Masking 0) = 0.3106`.
 
 ### 8.6 Luminance noise reduction
 
@@ -838,9 +846,9 @@ u = fx*fx*(3 - 2fx);  w = fy*fy*(3 - 2fy)
 a = lerp(h(i,j),   h(i+1,j),   u);   b = lerp(h(i,j+1), h(i+1,j+1), u);   return lerp(a, b, w)
 ```
 
-Porting warning: this hash uses 32-bit integer multiply, xor and shift. Flutter's fragment shaders are
-compiled for the runtime effect backends and integer bit operations are not reliably available on all of
-them; use a float hash with the same shape (**proposal, not from LightCraft**) and do not expect bit-exact
+Porting warning: this hash uses 32-bit integer multiply, xor and shift. **The integer hash needs a float
+replacement in Flutter shaders**: Flutter's fragment shaders are compiled for the runtime effect backends and
+integer bit operations are not reliably available on all of them; use a float hash with the same shape (**proposal, not from LightCraft**) and do not expect bit-exact
 output. Grain is position-based: the shader needs the frame coordinates and `ppl` (the long edge in px).
 
 ### 8.10 Calibration (listed for completeness)
@@ -1029,7 +1037,11 @@ smoothness 0..100 (50); `profile.amount` 0..200 (100).
 
 1. **Highlights and Shadows are neighbourhood-dependent in LightCraft** (sections 4, 6.3). A 3D LUT
    cannot reproduce them. Decision needed: bake the pixel-only proposal, or move them to the shader.
-2. **Everything is in linear Rec.2020 with OkLab(Rec.2020)**. If e-Layout works in sRGB primaries, the
+2. **Sensitivity to the sRGB port (a judgement, not measured):** the tools that shift most when the
+   Rec.2020/OkLab-tuned constants are used in sRGB are those with chroma thresholds, in this order:
+   vibrance (`C/0.22`), mixer (`chroma_w = C/0.12`), B&W mix (`C/0.2`), then grading wheel strengths (0.09),
+   then the rest. sRGB chroma values are larger for the same colour, so these ramps saturate sooner.
+3. **Everything is in linear Rec.2020 with OkLab(Rec.2020)**. If e-Layout works in sRGB primaries, the
    matrices change (section 3) and the ported constants (for example 0.22 and 0.12 in the chroma terms)
    were tuned for LightCraft's space; results will be close but not identical. Tests should compare
    behaviour, not byte equality with LightCraft.
