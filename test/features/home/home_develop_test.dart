@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -33,13 +34,64 @@ class FailingBatchStore extends MemoryBatchStore {
       Future.error(StateError('The disk is full.'));
 }
 
+/// Each put waits until the test completes its entry in [waits].
+class SlowBatchStore extends MemoryBatchStore {
+  final waits = <Completer<void>>[];
+  final keys = <String>[];
+
+  @override
+  Future<String> putPhoto(String name, Uint8List bytes) async {
+    final c = Completer<void>();
+    waits.add(c);
+    await c.future;
+    final k = await super.putPhoto(name, bytes);
+    keys.add(k);
+    return k;
+  }
+
+  /// Lets put number [i] (from 0) go once it has started.
+  Future<void> release(int i) async {
+    await until(() => waits.length > i);
+    waits[i].complete();
+  }
+}
+
+/// Puts and measurements fail while the flags say so.
+class FlakyBatchStore extends MemoryBatchStore {
+  bool failPut = false;
+  bool failMeasure = false;
+
+  @override
+  Future<String> putPhoto(String name, Uint8List bytes) => failPut
+      ? Future.error(StateError('The disk is full.'))
+      : super.putPhoto(name, bytes);
+
+  @override
+  Future<int> usedBytes() => failMeasure
+      ? Future.error(StateError('Cannot measure.'))
+      : super.usedBytes();
+}
+
+/// Waits (real time, inside runAsync) until [ok] holds.
+Future<void> until(bool Function() ok) async {
+  for (var i = 0; i < 2000 && !ok(); i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+  }
+  expect(ok(), isTrue, reason: 'timed out waiting');
+}
+
 class Stores {
   final batch = MemoryBatchStore();
   final presets = MemoryPresetStore();
 }
 
 class Rig {
-  Rig(this.stores, {PhotoDeveloper? developer, BatchStore? batch}) {
+  Rig(
+    this.stores, {
+    PhotoDeveloper? developer,
+    BatchStore? batch,
+    Future<PhotoDeveloper?>? developerLoad,
+  }) {
     controller = HomeController(
       layoutStore: MemoryLayoutStore(),
       settingsStore: SettingsStore(),
@@ -51,6 +103,7 @@ class Rig {
       presetStore: stores.presets,
       batchStore: batch ?? stores.batch,
       developer: developer,
+      developerLoad: developerLoad,
       bundled: () async => [LayoutDoc.blank('Plain')..id = 'office:plain'],
     );
   }
@@ -440,6 +493,186 @@ void main() {
       expect(c.saver.names, ['a_PIO.jpg']);
       expect(c.controller.message, startsWith('Saved 1 photo'));
       c.controller.dispose();
+    });
+  });
+
+  testWidgets(
+    'clearing during an add leaves the list, manifest and store empty',
+    (tester) async {
+      await tester.runAsync(() async {
+        final store = SlowBatchStore();
+        final c = Rig(Stores(), batch: store).controller;
+        await c.init();
+        await c.addPhotos([
+          picked('a.jpg', png(40, 30)),
+          picked('b.jpg', png(30, 40)),
+          picked('c.jpg', png(20, 20)),
+        ]);
+        await store.release(0); // a is copied
+        await until(() => store.waits.length == 2); // b's copy is on its way
+        expect(c.photos.first.key, isNotNull);
+        final cleared = c.clearPhotos();
+        store.waits[1].complete(); // b arrives after the clear started
+        await cleared;
+        await c.whenIdle();
+        expect(c.photos, isEmpty);
+        expect((await store.load())?.photos ?? [], isEmpty);
+        expect(store.keys.length, 2);
+        for (final k in store.keys) {
+          await expectLater(store.readPhoto(k), throwsStateError);
+        }
+        expect(store.waits.length, 2, reason: 'c was never copied');
+        expect(c.batchOk, isTrue);
+        expect(c.keptBytes, await store.usedBytes());
+        c.dispose();
+      });
+    },
+  );
+
+  testWidgets('five photos with a slow store appear at once, loading', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      final store = SlowBatchStore();
+      final c = Rig(Stores(), batch: store).controller;
+      await c.init();
+      await c.addPhotos([
+        for (final n in ['a', 'b', 'c', 'd', 'e'])
+          picked('$n.jpg', png(30, 20)),
+      ]);
+      expect(c.photos.length, 5);
+      expect(c.photos.map((p) => p.status), everyElement(PhotoStatus.loading));
+      expect(c.photos.map((p) => p.key), everyElement(isNull));
+      for (var i = 0; i < 5; i++) {
+        await store.release(i);
+      }
+      await c.whenIdle();
+      expect(c.photos.map((p) => p.status), everyElement(PhotoStatus.ready));
+      expect(c.photos.map((p) => p.key), everyElement(isNotNull));
+      final saved = (await store.load())!;
+      expect(
+        [for (final p in saved.photos) p.name],
+        ['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg', 'e.jpg'],
+      );
+      expect(store.waits.length, 5, reason: 'each photo is copied once');
+      c.dispose();
+    });
+  });
+
+  testWidgets('two quick adds of the same files add them once', (tester) async {
+    await tester.runAsync(() async {
+      final store = SlowBatchStore();
+      final c = Rig(Stores(), batch: store).controller;
+      await c.init();
+      final files = [
+        picked('a.jpg', png(30, 20)),
+        picked('b.jpg', png(30, 20)),
+        picked('c.jpg', png(30, 20)),
+      ];
+      final first = c.addPhotos(files);
+      final second = c.addPhotos(files);
+      await first;
+      await second;
+      expect(c.photos.length, 3);
+      await store.release(0);
+      await until(() => c.photos.first.key != null);
+      await c.addPhotos(files); // one kept, two still waiting to be copied
+      expect(c.photos.length, 3);
+      await store.release(1);
+      await store.release(2);
+      await c.whenIdle();
+      expect(store.waits.length, 3);
+      expect((await store.load())!.photos.length, 3);
+      c.dispose();
+    });
+  });
+
+  testWidgets('batchOk follows puts and manifest saves, not measurements', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      final store = FlakyBatchStore();
+      final c = Rig(Stores(), batch: store).controller;
+      await c.init();
+      store
+        ..failPut = true
+        ..failMeasure = true;
+      await c.addPhotos([picked('a.jpg', png(30, 20))]);
+      await c.whenIdle();
+      expect(c.batchOk, isFalse, reason: 'a could not be kept');
+      expect(c.photos.single.status, PhotoStatus.ready);
+      final before = c.keptBytes;
+
+      store.failPut = false;
+      await c.addPhotos([picked('b.jpg', png(30, 20))]);
+      await c.whenIdle();
+      expect(c.photos.last.key, isNotNull);
+      expect(c.batchOk, isFalse, reason: 'a is still not kept');
+      expect(
+        c.keptBytes,
+        before,
+        reason: 'a failed measurement keeps the last value',
+      );
+
+      await c.removePhoto(c.photos.first.id);
+      await c.whenIdle();
+      expect(
+        c.batchOk,
+        isTrue,
+        reason: 'a good manifest save with every photo kept',
+      );
+
+      store.failMeasure = false;
+      await c.setLook(c.look.withPhotoPatch(c.photos.single.id, exposure(1)));
+      expect(c.keptBytes, await store.usedBytes());
+      expect(c.batchOk, isTrue);
+      c.dispose();
+    });
+  });
+
+  testWidgets('the developer can arrive after start-up', (tester) async {
+    await tester.runAsync(() async {
+      final load = Completer<PhotoDeveloper?>();
+      final r = Rig(Stores(), developerLoad: load.future);
+      final c = r.controller;
+      await c.init();
+      expect(c.editingAvailable, isFalse);
+      expect(
+        c.notices.map((n) => n.text),
+        isNot(contains("Photo editing isn't available on this phone.")),
+        reason: 'not while it loads',
+      );
+      await c.addPhotos([picked('a.png', encodePng(grey(24, 16, 90), 24, 16))]);
+      await c.whenIdle();
+      final p = c.photos.single;
+      await c.setLook(c.look.withPhotoPatch(p.id, exposure(1)));
+      await c.whenIdle();
+      expect(p.developed, isNull);
+
+      final saving = c.saveAll();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(r.saver.names, isEmpty, reason: 'saving waits for the developer');
+      load.complete(CpuDeveloper());
+      await saving;
+      await c.whenIdle();
+      expect(c.editingAvailable, isTrue);
+      expect(p.developed, isNotNull);
+      expect(
+        meanLevel(r.saver.files.single),
+        greaterThan(110),
+        reason: 'saved with the edit',
+      );
+      c.dispose();
+
+      final none = Rig(Stores(), developerLoad: Future.value(null)).controller;
+      await none.init();
+      await Future<void>.delayed(Duration.zero);
+      expect(none.editingAvailable, isFalse);
+      expect(
+        none.notices.map((n) => n.text),
+        contains("Photo editing isn't available on this phone."),
+      );
+      none.dispose();
     });
   });
 }

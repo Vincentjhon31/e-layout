@@ -17,7 +17,7 @@ import 'platform/platform_services.dart';
 import 'platform/temp_files.dart';
 import 'platform/web_version.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
   final services = createPlatformServices();
   deviceNoun = services.deviceNoun;
@@ -31,7 +31,7 @@ Future<void> main() async {
     temp: createTempFiles(),
     presetStore: createPresetStore(),
     batchStore: createBatchStore(),
-    developer: await loadDeveloper(),
+    developerLoad: loadDeveloper(),
   );
   controller.init();
   // The only online parts: update checks (and the font library, which has its own client).

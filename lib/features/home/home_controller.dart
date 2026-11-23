@@ -62,11 +62,21 @@ enum PhotoStatus { loading, ready, error }
 class PhotoItem {
   PhotoItem(this.id, this.source, {this.key}) : name = source.name;
   final int id;
-  final PickedPhoto source;
+
+  /// Where the bytes come from: the picked file until the batch store holds
+  /// a copy, then the store.
+  PickedPhoto source;
   final String name;
 
-  /// Where the batch store keeps this photo's bytes (null when it isn't kept).
-  final String? key;
+  /// Where the batch store keeps this photo's bytes (null until it is kept,
+  /// and when keeping it failed).
+  String? key;
+
+  // Waiting to be copied into the batch store (new photos only).
+  bool _toCopy = false;
+
+  // Copying into the batch store failed.
+  bool _keepFailed = false;
   PhotoStatus status = PhotoStatus.loading;
   int width = 0, height = 0;
   ui.Image? preview;
@@ -115,12 +125,27 @@ class HomeController extends ChangeNotifier {
     this.convertFont,
     PresetStore? presetStore,
     BatchStore? batchStore,
-    this.developer,
-  })  : exporter = exporter ?? PhotoExporter(developer: developer),
+    PhotoDeveloper? developer,
+    Future<PhotoDeveloper?>? developerLoad,
+  })  : _developer = developer,
+        _ownExporter = exporter == null,
+        exporter = exporter ?? PhotoExporter(developer: developer),
         bundled = bundled ?? loadBundledLayouts,
         fontStore = fontStore ?? createFontStore(),
         presetStore = presetStore ?? createPresetStore(),
-        batchStore = batchStore ?? createBatchStore();
+        batchStore = batchStore ?? createBatchStore() {
+    if (developer == null && developerLoad != null) {
+      _developerReady = developerLoad.then((d) {
+        _developerReady = null;
+        if (d != null) _useDeveloper(d);
+        _changed();
+      }, onError: (Object e) {
+        _developerReady = null;
+        debugPrint('Photo editing is not available: $e');
+        _changed();
+      });
+    }
+  }
 
   final LayoutStore layoutStore;
   final SettingsStore settingsStore;
@@ -128,7 +153,11 @@ class HomeController extends ChangeNotifier {
   final GallerySaver saver;
   final FileSharer sharer;
   final TempFiles temp;
-  final PhotoExporter exporter;
+
+  /// Renders saved photos. The default one is replaced when the developer
+  /// arrives later.
+  PhotoExporter exporter;
+  final bool _ownExporter;
   final Future<List<LayoutDoc>> Function() bundled;
 
   /// Fonts the person added, kept on this phone.
@@ -143,8 +172,20 @@ class HomeController extends ChangeNotifier {
   /// The photos and their edits, kept between visits.
   final BatchStore batchStore;
 
-  /// Applies photo edits; null when it could not be loaded here.
-  final PhotoDeveloper? developer;
+  /// Applies photo edits; null while it loads and when it could not be
+  /// loaded here.
+  PhotoDeveloper? get developer => _developer;
+  PhotoDeveloper? _developer;
+
+  // Set while the developer passed as `developerLoad` is still loading.
+  Future<void>? _developerReady;
+
+  void _useDeveloper(PhotoDeveloper d) {
+    if (_disposed) return;
+    _developer = d;
+    if (_ownExporter) exporter = PhotoExporter(developer: d);
+    _developChanged();
+  }
 
   List<Preset> presets = [];
 
@@ -157,10 +198,11 @@ class HomeController extends ChangeNotifier {
   /// Bytes the kept batch takes on this device.
   int keptBytes = 0;
 
-  /// False once the batch store failed: photos may not survive a restart.
+  /// False after a photo could not be kept or the manifest could not be
+  /// saved: photos may not survive a restart.
   bool batchOk = true;
 
-  /// False when the developer could not be loaded.
+  /// False while the developer loads and when it could not be loaded.
   bool get editingAvailable => developer != null;
 
   List<LayoutItem> layouts = [];
@@ -182,8 +224,12 @@ class HomeController extends ChangeNotifier {
   // Created lazily, in the zone of the first add (a future made earlier would
   // deliver its callbacks in the zone it was made in).
   Future<void>? _queue;
-  // Manifest writes, one after another (also created lazily).
-  Future<void>? _manifestQueue;
+  // Every batch-store write and measurement, one after another (also lazy).
+  Future<void>? _storeQueue;
+  // A manifest write that is queued but has not started: later changes join it.
+  Future<void>? _pendingManifest;
+  // Bumped by clearPhotos: copies started before it are thrown away.
+  int _batchGen = 0;
   // The photo being developed: its images are freed by that job, not by
   // remove or clear.
   PhotoItem? _developing;
@@ -250,9 +296,8 @@ class HomeController extends ChangeNotifier {
   Future<void> _restoreBatch() async {
     BatchManifest? m;
     try {
-      m = await batchStore.load();
+      m = await _storeOp(batchStore.load);
     } catch (e) {
-      batchOk = false;
       debugPrint('The kept photos are unavailable: $e');
     }
     if (m != null) {
@@ -272,26 +317,47 @@ class HomeController extends ChangeNotifier {
       }
       look = next;
     }
-    await _measureKept();
+    await _storeOp(_measureKept);
   }
 
   PickedPhoto _storedSource(String key, String name, int? size, DateTime? modified, {String? path}) =>
       PickedPhoto(
           name: name, path: path, readBytes: () => batchStore.readPhoto(key), size: size, modified: modified);
 
+  /// Runs [op] after every batch-store operation queued before it. A failure
+  /// reaches only this caller; later operations still run.
+  Future<T> _storeOp<T>(Future<T> Function() op) {
+    final done = Completer<T>();
+    _storeQueue = (_storeQueue ?? Future<void>.value()).then((_) async {
+      try {
+        done.complete(await op());
+      } catch (e, st) {
+        done.completeError(e, st);
+      }
+    });
+    return done.future;
+  }
+
+  /// Reads the bytes the batch takes. Runs inside the store queue. A failed
+  /// measurement keeps the last value and does not change [batchOk].
   Future<void> _measureKept() async {
     try {
       keptBytes = await batchStore.usedBytes();
     } catch (e) {
-      batchOk = false;
       debugPrint('The kept photos could not be measured: $e');
     }
   }
 
-  /// Writes the manifest (the photos kept now and the look), then measures.
+  /// Writes the manifest (the photos kept at that moment and the look), then
+  /// measures. A write that is still waiting covers later changes too.
   Future<void> _saveManifest() {
-    final next = (_manifestQueue ?? Future<void>.value()).then((_) => _writeManifest());
-    _manifestQueue = next;
+    final waiting = _pendingManifest;
+    if (waiting != null) return waiting;
+    final next = _storeOp(() {
+      _pendingManifest = null;
+      return _writeManifest();
+    });
+    _pendingManifest = next;
     return next;
   }
 
@@ -307,6 +373,8 @@ class HomeController extends ChangeNotifier {
     );
     try {
       await batchStore.saveManifest(m);
+      // Good again, unless a photo in the batch could not be kept.
+      batchOk = !photos.any((p) => p._keepFailed);
     } catch (e) {
       batchOk = false;
       debugPrint('The kept photos could not be saved: $e');
@@ -374,6 +442,8 @@ class HomeController extends ChangeNotifier {
     if (photoFiles.isNotEmpty) await addPhotos(photoFiles);
   }
 
+  /// Adds the new photos at once, loading. Each one is copied into the batch
+  /// store by its preview job.
   Future<void> addPhotos(List<PickedPhoto> picked) async {
     final known = {for (final p in photos) p.source.key};
     final fresh = <PickedPhoto>[];
@@ -381,35 +451,50 @@ class HomeController extends ChangeNotifier {
       if (known.add(f.key)) fresh.add(f);
     }
     fresh.sort((a, b) => naturalCompare(a.name, b.name));
-    message = '';
     for (final f in fresh) {
-      final item = await _keep(f);
+      final item = PhotoItem(_nextId++, f).._toCopy = true;
       photos.add(item);
       _queuePreview(item);
-      _changed();
     }
+    message = '';
     _changed();
-    if (fresh.isNotEmpty) await _saveManifest();
   }
 
-  /// Copies [f]'s bytes into the batch store. When that fails the photo stays
-  /// for this visit only.
-  Future<PhotoItem> _keep(PickedPhoto f) async {
-    final id = _nextId++;
-    final Uint8List bytes;
+  /// Copies [bytes] into the batch store and switches [p] to that copy. When
+  /// the copy fails the photo stays for this visit only. A copy that finishes
+  /// after [p] was removed or the batch was cleared is deleted again.
+  Future<void> _keep(PhotoItem p, Uint8List bytes) async {
+    final gen = _batchGen;
+    p._toCopy = false;
+    final String key;
     try {
-      bytes = await f.readBytes();
-    } catch (_) {
-      return PhotoItem(id, f); // unreadable: its preview shows the error
-    }
-    try {
-      final key = await batchStore.putPhoto(f.name, bytes);
-      return PhotoItem(id, _storedSource(key, f.name, f.size, f.modified, path: f.path), key: key);
+      key = await _storeOp(() => batchStore.putPhoto(p.name, bytes));
     } catch (e) {
-      batchOk = false;
-      debugPrint('Could not keep ${f.name}: $e');
-      return PhotoItem(id, f);
+      debugPrint('Could not keep ${p.name}: $e');
+      if (gen == _batchGen && photos.contains(p)) {
+        p._keepFailed = true;
+        batchOk = false;
+        _changed();
+      }
+      return;
     }
+    if (gen != _batchGen || !photos.contains(p) || _disposed) {
+      _storeOp(() async {
+        try {
+          await batchStore.removePhoto(key);
+        } catch (e) {
+          debugPrint('Could not delete a copy no longer needed: $e');
+        }
+        await _measureKept();
+        _changed();
+      });
+      return;
+    }
+    final f = p.source;
+    p
+      ..key = key
+      ..source = _storedSource(key, f.name, f.size, f.modified, path: f.path);
+    _saveManifest();
   }
 
   void _enqueue(Future<void> Function() job) {
@@ -420,20 +505,24 @@ class HomeController extends ChangeNotifier {
 
   void _queuePreview(PhotoItem item) => _enqueue(() => _loadPreview(item));
 
-  /// Completes when every queued preview has loaded.
+  /// Completes when every queued preview and batch-store operation is done.
   Future<void> whenIdle() async {
-    Future<void>? tail;
+    Future<void>? previews, store;
     do {
-      tail = _queue;
-      if (tail == null) return;
-      await tail;
-    } while (!identical(tail, _queue));
+      previews = _queue;
+      store = _storeQueue;
+      if (previews != null) await previews;
+      if (store != null) await store;
+    } while (!identical(previews, _queue) || !identical(store, _storeQueue));
   }
 
   Future<void> _loadPreview(PhotoItem p) async {
     if (!photos.contains(p) || _disposed) return;
     try {
       final bytes = await p.source.readBytes();
+      // New photos: the same bytes go into the batch store, then the preview.
+      if (p._toCopy) await _keep(p, bytes);
+      if (!photos.contains(p) || _disposed) return;
       final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
       ui.ImageDescriptor? desc;
       try {
@@ -545,21 +634,27 @@ class HomeController extends ChangeNotifier {
     look = look.withoutPhoto(id);
     message = '';
     _changed();
+    // The manifest first, so a restart never lists bytes that are gone.
+    await _saveManifest();
     final key = p.key;
     if (key != null) {
-      try {
-        await batchStore.removePhoto(key);
-      } catch (e) {
-        batchOk = false;
-        debugPrint('Could not remove the kept copy of ${p.name}: $e');
-      }
+      await _storeOp(() async {
+        try {
+          await batchStore.removePhoto(key);
+        } catch (e) {
+          debugPrint('Could not remove the kept copy of ${p.name}: $e');
+        }
+        await _measureKept();
+      });
+      _changed();
     }
-    await _saveManifest();
   }
 
-  /// Removes every photo, its kept copy and the look.
+  /// Removes every photo, its kept copy and the look. Copies still on their
+  /// way into the store are deleted when they arrive.
   Future<void> clearPhotos() async {
     if (saving) return;
+    _batchGen++;
     for (final p in photos) {
       _release(p);
     }
@@ -568,9 +663,8 @@ class HomeController extends ChangeNotifier {
     message = '';
     _changed();
     try {
-      await batchStore.clear();
+      await _storeOp(batchStore.clear);
     } catch (e) {
-      batchOk = false;
       debugPrint('Could not clear the kept photos: $e');
     }
     await _saveManifest();
@@ -736,7 +830,7 @@ class HomeController extends ChangeNotifier {
       out.add(Notice(
           NoteKind.warning, "Photos can't be kept on this $deviceNoun, so they will be gone when the app closes."));
     }
-    if (!editingAvailable) {
+    if (!editingAvailable && _developerReady == null) {
       out.add(Notice(NoteKind.info, "Photo editing isn't available on this $deviceNoun."));
     }
     return out;
@@ -927,6 +1021,7 @@ class HomeController extends ChangeNotifier {
     final item = current;
     if (item == null || saving) return;
     await whenIdle();
+    await _developerReady; // edits are not dropped while the developer loads
     final list = readyPhotos;
     if (list.isEmpty) return;
     final j = job = ExportJob(list.length);
@@ -1019,7 +1114,13 @@ class HomeController extends ChangeNotifier {
   Future<(String name, Uint8List bytes)> _renderOne(PhotoItem p) async {
     final item = current;
     if (item == null) throw StateError('Choose a layout first.');
-    final out = await _render(p, await p.source.readBytes(), item);
+    await _developerReady;
+    final RenderedPhoto out;
+    try {
+      out = await _render(p, await p.source.readBytes(), item);
+    } finally {
+      developer?.clearCache();
+    }
     return ('${outputStem(p.name, settings.suffix)}.${out.ext}', out.bytes);
   }
 
