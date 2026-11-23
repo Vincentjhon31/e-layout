@@ -72,6 +72,17 @@ class FlakyBatchStore extends MemoryBatchStore {
       : super.usedBytes();
 }
 
+/// Counts the measurements.
+class CountingBatchStore extends MemoryBatchStore {
+  int measures = 0;
+
+  @override
+  Future<int> usedBytes() {
+    measures++;
+    return super.usedBytes();
+  }
+}
+
 /// Waits (real time, inside runAsync) until [ok] holds.
 Future<void> until(bool Function() ok) async {
   for (var i = 0; i < 2000 && !ok(); i++) {
@@ -140,6 +151,27 @@ Uint8List grey(int w, int h, int v) {
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
+  testWidgets('kept bytes are measured when photos change, not on a look', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      final store = CountingBatchStore();
+      final c = Rig(Stores(), developer: CpuDeveloper(), batch: store).controller;
+      await c.init();
+      await c.whenIdle();
+      final afterInit = store.measures;
+      await c.addPhotos([picked('a.jpg', png(40, 30))]);
+      await c.whenIdle();
+      expect(store.measures, greaterThan(afterInit), reason: 'a copy was kept');
+      expect(c.keptBytes, await store.usedBytes());
+      final before = store.measures;
+      await c.setLook(c.look.withPhotoPatch(c.photos.first.id, exposure(1)));
+      await c.whenIdle();
+      expect(store.measures, before, reason: 'a look does not measure');
+      c.dispose();
+    });
+  });
+
   testWidgets('photos and edits come back after a restart', (tester) async {
     await tester.runAsync(() async {
       final stores = Stores();
@@ -159,7 +191,11 @@ void main() {
         isNull,
         reason: 'a neutral photo keeps its preview',
       );
-      expect(a.keptBytes, await stores.batch.usedBytes());
+      // A look does not measure, so only the manifest's growth is missing.
+      expect(
+        a.keptBytes,
+        closeTo(await stores.batch.usedBytes(), 2048),
+      );
       expect(a.keptBytes, greaterThan(0));
       final look = a.look.toJson();
       final ids = [for (final p in a.photos) p.id];
@@ -523,7 +559,7 @@ void main() {
         }
         expect(store.waits.length, 2, reason: 'c was never copied');
         expect(c.batchOk, isTrue);
-        expect(c.keptBytes, await store.usedBytes());
+        expect(c.keptBytes, closeTo(await store.usedBytes(), 2048));
         c.dispose();
       });
     },

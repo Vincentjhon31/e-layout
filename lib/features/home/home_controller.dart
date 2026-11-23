@@ -228,6 +228,10 @@ class HomeController extends ChangeNotifier {
   Future<void>? _storeQueue;
   // A manifest write that is queued but has not started: later changes join it.
   Future<void>? _pendingManifest;
+
+  /// True when the photo set changed since the kept bytes were measured. A
+  /// look-only manifest write does not measure.
+  bool _measureDirty = false;
   // Bumped by clearPhotos: copies started before it are thrown away.
   int _batchGen = 0;
   // The photo being developed: its images are freed by that job, not by
@@ -343,7 +347,10 @@ class HomeController extends ChangeNotifier {
   Future<void> _measureKept() async {
     try {
       keptBytes = await batchStore.usedBytes();
+      _measureDirty = false;
     } catch (e) {
+      // Try again on the next manifest write.
+      _measureDirty = true;
       debugPrint('The kept photos could not be measured: $e');
     }
   }
@@ -379,7 +386,7 @@ class HomeController extends ChangeNotifier {
       batchOk = false;
       debugPrint('The kept photos could not be saved: $e');
     }
-    await _measureKept();
+    if (_measureDirty) await _measureKept();
     _changed();
   }
 
@@ -494,6 +501,7 @@ class HomeController extends ChangeNotifier {
     p
       ..key = key
       ..source = _storedSource(key, f.name, f.size, f.modified, path: f.path);
+    _measureDirty = true;
     _saveManifest();
   }
 
@@ -667,6 +675,7 @@ class HomeController extends ChangeNotifier {
     } catch (e) {
       debugPrint('Could not clear the kept photos: $e');
     }
+    _measureDirty = true;
     await _saveManifest();
   }
 

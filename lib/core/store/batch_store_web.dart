@@ -6,7 +6,8 @@ import 'batch_store.dart';
 import 'idb_web.dart';
 
 /// The batch in the browser's IndexedDB. Keys are `manifest` (JSON text) and
-/// `photo:<key>` (the bytes as a `Uint8Array`).
+/// `photo:<key>` (the bytes as a `Uint8Array`), with a
+/// `size:<key>` record of its length.
 class IdbBatchStore implements BatchStore {
   IdbBatchStore([String name = 'e-layout-batch']) : _box = IdbBox(name);
 
@@ -31,6 +32,7 @@ class IdbBatchStore implements BatchStore {
     final key = newPhotoKey(name);
     // Copy, so the stored data is not a view on the caller's buffer.
     await _box.put('photo:$key', Uint8List.fromList(bytes).toJS);
+    await _box.put('size:$key', bytes.length.toJS);
     return key;
   }
 
@@ -42,7 +44,10 @@ class IdbBatchStore implements BatchStore {
   }
 
   @override
-  Future<void> removePhoto(String key) => _box.delete('photo:$key');
+  Future<void> removePhoto(String key) async {
+    await _box.delete('photo:$key');
+    await _box.delete('size:$key');
+  }
 
   @override
   Future<void> clear() async {
@@ -51,17 +56,27 @@ class IdbBatchStore implements BatchStore {
     }
   }
 
+  /// Sums the size records, so no photo bytes are loaded. A photo kept
+  /// before size records existed is read once and gets one.
   @override
   Future<int> usedBytes() async {
     final keys = await _box.keys();
-    final values = await _box.values();
+    final have = keys.toSet();
     var n = 0;
-    for (var i = 0; i < keys.length && i < values.length; i++) {
-      final v = values[i];
-      if (keys[i].startsWith('photo:') && v != null) {
-        n += (v as JSUint8Array).toDart.length;
-      } else if (keys[i] == 'manifest' && v != null) {
-        n += utf8.encode((v as JSString).toDart).length;
+    for (final k in keys) {
+      if (k.startsWith('size:')) {
+        final v = await _box.get(k);
+        if (v != null) n += (v as JSNumber).toDartInt;
+      } else if (k == 'manifest') {
+        final v = await _box.get(k);
+        if (v != null) n += utf8.encode((v as JSString).toDart).length;
+      } else if (k.startsWith('photo:') && !have.contains('size:${k.substring(6)}')) {
+        final v = await _box.get(k);
+        if (v != null) {
+          final len = (v as JSUint8Array).toDart.length;
+          await _box.put('size:${k.substring(6)}', len.toJS);
+          n += len;
+        }
       }
     }
     return n;

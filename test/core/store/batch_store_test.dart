@@ -83,6 +83,17 @@ void contract(String label, BatchStore Function() make) {
       expect(() => s.readPhoto('gone.jpg'), throwsStateError);
     });
 
+    test('usedBytes follows puts and removes', () async {
+      final s = make();
+      final a = await s.putPhoto('a.jpg', Uint8List(100));
+      final b = await s.putPhoto('b.jpg', Uint8List(40));
+      expect(await s.usedBytes(), 140);
+      await s.removePhoto(a);
+      expect(await s.usedBytes(), 40);
+      await s.removePhoto(b);
+      expect(await s.usedBytes(), 0);
+    });
+
     test('usedBytes counts photos and manifest; clear empties all', () async {
       final s = make();
       expect(await s.usedBytes(), 0);
