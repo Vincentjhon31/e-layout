@@ -7,6 +7,13 @@ Write short, plain bullets that start with "- ", one idea each, for the people w
 Never mention internal details such as servers, hosting, keys, admin tools or file paths.
 -->
 
+## 1.0.1
+
+- Fixed saving photos in the browser version.
+- On Windows, the window now uses the whole screen well: more photos in a row, and settings sheets that don't stretch across.
+- On Windows and in the browser, drop photos or a whole folder onto e-Layout to add them, or drop a layout file to import it.
+- Keyboard shortcuts in the layout editor: arrow keys move pieces, Ctrl+Z undoes, Ctrl+D duplicates, Delete removes, and Ctrl+scroll zooms.
+
 ## 1.0.0
 
 - PIO Photo Layout is now e-Layout, with a new icon. It runs on Android phones, on Windows computers and in the browser.

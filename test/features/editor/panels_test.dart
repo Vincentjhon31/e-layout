@@ -671,10 +671,18 @@ void main() {
       await tester.pumpAndSettle();
       await tapTile(tester, 'Fit');
       await tester.pumpAndSettle();
-      // Let the "Saving" to "All changes saved" cross-fade finish first.
-      await tester.runAsync(c.flushSave);
+      // Let the "Saving" to "All changes saved" cross-fade finish first. The save runs real
+      // file work, so wait (up to about 10 s) until "Saving" is gone, not a fixed time.
+      for (var i = 0; i < 50 && find.textContaining('Saving').evaluate().isNotEmpty; i++) {
+        await tester.runAsync(() async {
+          await c.flushSave();
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        });
+        await tester.pump(const Duration(milliseconds: 500));
+      }
       await tester.pump(const Duration(seconds: 3));
       await tester.pumpAndSettle();
+      expect(find.textContaining('Saving'), findsNothing);
       await shot(tester, 'picture_fit');
     });
 

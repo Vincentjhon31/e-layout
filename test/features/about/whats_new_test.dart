@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pio_photo_layout/app_info.dart';
 import 'package:pio_photo_layout/core/store/settings_store.dart';
 import 'package:pio_photo_layout/features/about/whats_new.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -42,11 +43,13 @@ void main() {
     expect(e[1].items, ['The start, with an image in it.']);
   });
 
-  test('the real file has a 1.0.0 section with at least three bullets', () async {
+  test('the real file starts with the current version, and keeps the 1.0.0 notes', () async {
     final text = await rootBundle.loadString('assets/whats_new.md');
     final e = parseWhatsNew(text);
-    expect(e.first.version, '1.0.0');
-    expect(e.first.items.length, greaterThanOrEqualTo(3));
+    expect(e.first.version, kAppVersion);
+    expect(e.first.items, isNotEmpty);
+    final first = e.firstWhere((x) => x.version == '1.0.0');
+    expect(first.items.length, greaterThanOrEqualTo(3));
   });
 
   Future<(SettingsStore, BuildContext)> setup(WidgetTester tester, Map<String, Object> prefs) async {
