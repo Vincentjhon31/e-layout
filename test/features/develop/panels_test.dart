@@ -173,6 +173,31 @@ void main() {
     });
   });
 
+  group('undo steps', () {
+    etest('a double-tap reset is one undo step', (tester) async {
+      final e = await open(tester, ToolPanel.light);
+      await tester.runAsync(() => e.setValue(Setting.contrast, 40));
+      await tester.pump();
+      await doubleTapAt(tester, tester.getCenter(find.text('Contrast')));
+      await settle(tester);
+      expect(e.settings[Setting.contrast], 0);
+      await e.undo();
+      await tester.pump();
+      expect(
+        e.settings[Setting.contrast],
+        40,
+        reason: 'one undo undoes the reset',
+      );
+    });
+
+    etest('a reset on a neutral value adds no step', (tester) async {
+      final e = await open(tester, ToolPanel.light);
+      await doubleTapAt(tester, tester.getCenter(find.text('Contrast')));
+      await settle(tester);
+      expect(e.canUndo, isFalse);
+    });
+  });
+
   group('splits', () {
     etest('shadow < midtone < highlight with gaps of at least 5', (
       tester,
@@ -188,6 +213,50 @@ void main() {
       // The midtone split stays between its neighbours.
       await dragTo(tester, sliderOf(Setting.curveMidtoneSplit), 1.0);
       expect(e.settings[Setting.curveMidtoneSplit], 50);
+    });
+
+    etest('a clamped split drag is one undo step', (tester) async {
+      final e = await open(tester, ToolPanel.light);
+      await openTab(tester, 'Splits');
+      await dragTo(tester, sliderOf(Setting.curveShadowSplit), 1.0);
+      expect(e.settings[Setting.curveShadowSplit], 45);
+      await e.undo();
+      await tester.pump();
+      expect(e.settings[Setting.curveShadowSplit], 25);
+      expect(e.canUndo, isFalse);
+    });
+
+    etest('splits that are already close do not break the sliders', (
+      tester,
+    ) async {
+      final e = await open(tester, ToolPanel.light);
+      await tester.runAsync(
+        () => e.home.setLook(
+          e.home.look.withPhotoPatch(
+            e.photo.id,
+            SettingsPatch(
+              values: {
+                Setting.curveShadowSplit: 90,
+                Setting.curveMidtoneSplit: 92,
+                Setting.curveHighlightSplit: 95,
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await openTab(tester, 'Splits');
+      await dragTo(tester, sliderOf(Setting.curveMidtoneSplit), 0.0);
+      await dragTo(tester, sliderOf(Setting.curveHighlightSplit), 0.0);
+      await dragTo(tester, sliderOf(Setting.curveShadowSplit), 1.0);
+      for (final s in [
+        Setting.curveShadowSplit,
+        Setting.curveMidtoneSplit,
+        Setting.curveHighlightSplit,
+      ]) {
+        expect(e.settings[s], inInclusiveRange(s.min, s.max));
+      }
+      expect(tester.takeException(), isNull);
     });
   });
 
@@ -288,6 +357,47 @@ void main() {
       final after = [for (final q in pts(e)) q.x];
       expect(after[2], greaterThan(after[1]));
       expect(after[1], greaterThan(after[0]));
+    });
+
+    etest('a tap 20 pt from a point takes it; 30 pt away adds one', (
+      tester,
+    ) async {
+      final e = await open(tester, ToolPanel.light);
+      await openTab(tester, 'Curve');
+      await tapAt(tester, curveAt(tester, 128, 128));
+      await settle(tester);
+      expect(pts(e).length, 3);
+      final at = curveAt(tester, pts(e)[1].x, pts(e)[1].y);
+      await tapAt(tester, at + const Offset(20, 0));
+      await settle(tester);
+      expect(pts(e).length, 3, reason: '20 pt is on the handle');
+      await tapAt(tester, at + const Offset(30, 0));
+      await settle(tester);
+      expect(pts(e).length, 4, reason: '30 pt is empty space');
+    });
+
+    etest('a middle point stays between close neighbours', (tester) async {
+      final e = await open(tester, ToolPanel.light);
+      await tester.runAsync(
+        () => e.setCurve(CurveChannel.master, const [
+          CurvePoint(0, 0),
+          CurvePoint(100, 100),
+          CurvePoint(103, 103),
+          CurvePoint(255, 255),
+        ]),
+      );
+      await tester.pump();
+      await openTab(tester, 'Curve');
+      final g = await tester.startGesture(curveAt(tester, 100, 100));
+      await g.moveTo(curveAt(tester, 200, 120));
+      await tester.pump();
+      await g.moveTo(curveAt(tester, 230, 120));
+      await tester.pump();
+      await g.up();
+      await settle(tester);
+      expect(pts(e)[1].x, 102, reason: 'one short of its right neighbour');
+      expect(pts(e)[2].x, 103);
+      expect(pts(e)[1].y, closeTo(120, 3));
     });
 
     etest('a colour chip edits that channel only', (tester) async {
@@ -397,6 +507,51 @@ void main() {
       await openTab(tester, 'Blend');
       expect(find.text('Blending'), findsOneWidget);
       expect(find.text('Balance'), findsOneWidget);
+    });
+  });
+
+  group('mixer dots', () {
+    for (final size in const [Size(390, 844), Size(320, 568)]) {
+      etest('every dot is 44 x 44 at ${size.width.toInt()}', (tester) async {
+        await open(tester, ToolPanel.colour, size: size);
+        await openTab(tester, 'Mixer');
+        for (final n in [
+          'Red',
+          'Orange',
+          'Yellow',
+          'Green',
+          'Aqua',
+          'Blue',
+          'Purple',
+          'Magenta',
+        ]) {
+          final r = tester.getSize(find.byKey(ValueKey('mixer-$n')));
+          expect(r.width, greaterThanOrEqualTo(44), reason: n);
+          expect(r.height, greaterThanOrEqualTo(44), reason: n);
+        }
+      });
+    }
+
+    etest('at 320 the strip scrolls and a chosen dot comes into view', (
+      tester,
+    ) async {
+      await open(tester, ToolPanel.colour, size: const Size(320, 568));
+      await openTab(tester, 'Mixer');
+      final strip = find.byKey(const ValueKey('mixer-Magenta'));
+      expect(
+        tester.getRect(strip).right,
+        greaterThan(320 - 16),
+        reason: 'off the end at first',
+      );
+      await tester.drag(
+        find.byKey(const ValueKey('mixer-strip')),
+        const Offset(-200, 0),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(strip);
+      await tester.pumpAndSettle();
+      expect(tester.getRect(strip).right, lessThanOrEqualTo(320));
+      expect(tester.getRect(strip).left, greaterThanOrEqualTo(0));
     });
   });
 

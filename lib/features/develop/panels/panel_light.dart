@@ -36,7 +36,13 @@ class LightPanel extends StatelessWidget {
           c,
           v,
           label,
-          limit: (x) => x.clamp(lo, hi < lo ? lo : hi).toDouble(),
+          limit: (x) {
+            // Splits that are already too close (from a preset) still
+            // give bounds inside the slider's range.
+            final low = lo.clamp(v.min, v.max).toDouble();
+            final high = hi.clamp(low, v.max).toDouble();
+            return x.clamp(low, high).toDouble();
+          },
         );
       }
 

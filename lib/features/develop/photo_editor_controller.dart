@@ -139,8 +139,10 @@ class PhotoEditorController extends ChangeNotifier {
   Future<void> _patch(SettingsPatch Function() p) =>
       _commit(() => home.look.withPhotoPatch(photo.id, p()));
 
-  Future<void> setValue(Setting s, double v) =>
-      _patch(() => SettingsPatch(values: {s: s.clamp(v)}));
+  Future<void> setValue(Setting s, double v) async {
+    if (!changing && settings[s] == s.clamp(v)) return;
+    await _patch(() => SettingsPatch(values: {s: s.clamp(v)}));
+  }
 
   Future<void> setCurve(CurveChannel c, List<CurvePoint> pts) =>
       _patch(() => SettingsPatch(curves: {c: pts}));

@@ -94,7 +94,9 @@ class _CurveEditorState extends State<CurveEditor> {
     final (cx, cy) = _toCurve(o);
     var x = pts[i].x;
     if (i > 0 && i < pts.length - 1) {
-      x = cx.clamp(pts[i - 1].x + 1, pts[i + 1].x - 1);
+      final lo = pts[i - 1].x + 1, hi = pts[i + 1].x - 1;
+      // Neighbours 1 apart (or equal) leave no room: the point stays put.
+      if (hi >= lo) x = cx.clamp(lo, hi);
     }
     pts[i] = CurvePoint(x, cy);
     setState(() => _live = pts);

@@ -236,6 +236,54 @@ class _MixerTab extends StatefulWidget {
 
 class _MixerTabState extends State<_MixerTab> {
   int _band = 0;
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _choose(int i, double viewport) {
+    setState(() => _band = i);
+    if (!_scroll.hasClients) return;
+    final max = _scroll.position.maxScrollExtent;
+    final to = (i * 44 - (viewport - 44) / 2).clamp(0.0, max).toDouble();
+    _scroll.animateTo(
+      to,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Widget _dot(int i, AppColors colors, double viewport) => Pressable(
+    onPressed: () => _choose(i, viewport),
+    semanticLabel: _bands[i].name,
+    child: SizedBox(
+      key: ValueKey('mixer-${_bands[i].name}'),
+      height: 44,
+      child: Center(
+        child: Container(
+          width: 30,
+          height: 30,
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: i == _band ? colors.text : const Color(0x00000000),
+              width: 2,
+            ),
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _bands[i].color,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -249,42 +297,33 @@ class _MixerTabState extends State<_MixerTab> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            for (var i = 0; i < _bands.length; i++)
-              Expanded(
-                child: Pressable(
-                  onPressed: () => setState(() => _band = i),
-                  semanticLabel: _bands[i].name,
-                  child: SizedBox(
-                    key: ValueKey('mixer-${_bands[i].name}'),
-                    height: 44,
-                    child: Center(
-                      child: Container(
-                        width: 30,
-                        height: 30,
-                        padding: const EdgeInsets.all(3),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: i == _band
-                                ? colors.text
-                                : const Color(0x00000000),
-                            width: 2,
-                          ),
-                        ),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: _bands[i].color,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+        LayoutBuilder(
+          builder: (context, box) {
+            // Eight 44 pt dots need 352 pt; on a narrower panel the strip
+            // scrolls and the chosen dot is kept in view.
+            if (box.maxWidth >= _bands.length * 44) {
+              return Row(
+                children: [
+                  for (var i = 0; i < _bands.length; i++)
+                    Expanded(child: _dot(i, colors, box.maxWidth)),
+                ],
+              );
+            }
+            return SizedBox(
+              height: 44,
+              child: SingleChildScrollView(
+                key: const ValueKey('mixer-strip'),
+                controller: _scroll,
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (var i = 0; i < _bands.length; i++)
+                      SizedBox(width: 44, child: _dot(i, colors, box.maxWidth)),
+                  ],
                 ),
               ),
-          ],
+            );
+          },
         ),
         const SizedBox(height: 4),
         if (gray) ...[
