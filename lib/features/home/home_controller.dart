@@ -717,7 +717,7 @@ class HomeController extends ChangeNotifier {
   }
 
   /// Makes [p] the shared preset (null for none); single-photo changes stay.
-  Future<void> choosePresetForAll(Preset? p) => setLook(look.withPresetForAll(p?.patch, p?.name));
+  Future<void> choosePresetForAll(Preset? p) => setLook(look.withPresetForAll(p?.patch, p?.name, p?.id));
 
   /// Reads preset and profile files, keeps what they hold and returns the
   /// line to show. Files over [kPresetFileCap] are not read.
@@ -779,6 +779,10 @@ class HomeController extends ChangeNotifier {
 
   Future<void> removePreset(Preset p) async {
     presets.removeWhere((e) => e.id == p.id);
+    if (look.sharedId == p.id) {
+      look = look.withoutPresetName();
+      unawaited(_saveManifest());
+    }
     _changed();
     try {
       await presetStore.removePreset(p.id);

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../core/render/photo_geometry.dart';
 import '../../ui/app_theme.dart';
 import '../../ui/previews.dart';
 import '../../ui/widgets/pressable.dart';
@@ -179,22 +180,45 @@ class _PhotoCell extends StatelessWidget {
           ),
         ),
         if (ownChanges && photo.status == PhotoStatus.ready)
-          Positioned(
-            top: 6,
-            left: 6,
+          Positioned.fill(
             child: IgnorePointer(
-              child: Container(
-                key: const Key('own-changes-dot'),
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: c.accent,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: const Color(0xCCFFFFFF),
-                    width: 0.5,
-                  ),
-                ),
+              child: LayoutBuilder(
+                builder: (context, box) {
+                  // Where the picture is drawn (fitted inside the cell, as
+                  // CompositePainter does), so the dot sits on the photo.
+                  final g = photoGeometry(
+                    photo.width,
+                    photo.height,
+                    layout?.doc,
+                  );
+                  final k = math.min(box.maxWidth / g.w, box.maxHeight / g.h);
+                  final left = (box.maxWidth - g.w * k) / 2;
+                  final top = (box.maxHeight - g.h * k) / 2;
+                  return Stack(
+                    children: [
+                      Positioned(
+                        left: left + 6,
+                        top: top + 6,
+                        child: Semantics(
+                          label: 'Edited',
+                          child: Container(
+                            key: const Key('own-changes-dot'),
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: c.accent,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: const Color(0xCCFFFFFF),
+                                width: 0.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ),

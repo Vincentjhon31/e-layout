@@ -142,4 +142,37 @@ void main() {
     expect(none.shared.isEmpty, true);
     expect(none.photos, isEmpty);
   });
+
+  test('the shared id is kept, saved, and dropped by None and copyToAll', () {
+    var look = const BatchLook().withPresetForAll(
+      SettingsPatch(values: {Setting.exposure: 0.5}),
+      'A',
+      'id-a',
+    );
+    expect(look.sharedId, 'id-a');
+    look = look.withPhotoPatch(
+      3,
+      SettingsPatch(values: {Setting.contrast: 10}),
+    );
+    expect(look.sharedId, 'id-a', reason: 'a single-photo change keeps it');
+    final back = BatchLook.fromJson(look.toJson());
+    expect(back.sharedId, 'id-a');
+    expect(back.sharedName, 'A');
+    expect(look.withPresetForAll(null, null).sharedId, isNull);
+    expect(look.withoutPresetName().sharedId, isNull);
+    expect(look.withoutPresetName().sharedName, isNull);
+    expect(look.withoutPresetName().shared.isEmpty, isFalse);
+    final copied = look.copyToAll(3, {ToolGroup.light}, keepSingle: true);
+    expect(copied.sharedId, isNull);
+  });
+
+  test('old JSON without a shared id still loads', () {
+    final look = BatchLook.fromJson({
+      'shared': SettingsPatch(values: {Setting.exposure: 1}).toJson(),
+      'sharedName': 'Old',
+      'photos': <String, dynamic>{},
+    });
+    expect(look.sharedName, 'Old');
+    expect(look.sharedId, isNull);
+  });
 }

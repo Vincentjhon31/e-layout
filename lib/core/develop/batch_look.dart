@@ -6,15 +6,22 @@ import 'settings.dart';
 /// carry `extras` (they are stripped), so an override is empty exactly when
 /// [SettingsPatch.isEmpty] says so, and empty ones are removed from [photos].
 class BatchLook {
-  const BatchLook() : _shared = null, sharedName = null, _photos = null;
+  const BatchLook()
+    : _shared = null,
+      sharedName = null,
+      sharedId = null,
+      _photos = null;
 
-  BatchLook._(this._shared, this.sharedName, this._photos);
+  BatchLook._(this._shared, this.sharedName, this.sharedId, this._photos);
 
   final SettingsPatch? _shared;
   final Map<int, SettingsPatch>? _photos;
 
   /// The name of the shared preset, or null for none or "Custom".
   final String? sharedName;
+
+  /// The id of the shared preset, or null for none, "Custom" and old data.
+  final String? sharedId;
 
   SettingsPatch get shared => _shared ?? _emptyPatch;
   Map<int, SettingsPatch> get photos => _photos ?? const {};
@@ -33,6 +40,7 @@ class BatchLook {
   static BatchLook _make(
     SettingsPatch shared,
     String? name,
+    String? id,
     Map<int, SettingsPatch> photos,
   ) {
     final clean = <int, SettingsPatch>{};
@@ -40,7 +48,7 @@ class BatchLook {
       final p = _strip(e.value);
       if (!p.isEmpty) clean[e.key] = p;
     }
-    return BatchLook._(shared, name, Map.unmodifiable(clean));
+    return BatchLook._(shared, name, id, Map.unmodifiable(clean));
   }
 
   EditSettings settingsFor(int id) {
@@ -51,20 +59,31 @@ class BatchLook {
   bool hasOwnChanges(int id) => photos.containsKey(id);
 
   /// Replaces the shared preset ([patch] null means "None"). Overrides stay.
-  BatchLook withPresetForAll(SettingsPatch? patch, String? name) =>
-      _make(patch ?? SettingsPatch(), patch == null ? null : name, photos);
+  BatchLook withPresetForAll(
+    SettingsPatch? patch,
+    String? name, [
+    String? id,
+  ]) => _make(
+    patch ?? SettingsPatch(),
+    patch == null ? null : name,
+    patch == null ? null : id,
+    photos,
+  );
+
+  /// The same look with no preset name or id (it shows as "Custom").
+  BatchLook withoutPresetName() => _make(shared, null, null, photos);
 
   /// Merges [p] over this photo's overrides.
   BatchLook withPhotoPatch(int id, SettingsPatch p) {
     final merged = (photos[id] ?? SettingsPatch()).over(_strip(p));
-    return _make(shared, sharedName, {...photos, id: merged});
+    return _make(shared, sharedName, sharedId, {...photos, id: merged});
   }
 
   /// Drops this photo's overrides so it follows the shared preset again.
   BatchLook resetPhoto(int id) => withoutPhoto(id);
 
   BatchLook withoutPhoto(int id) =>
-      _make(shared, sharedName, {...photos}..remove(id));
+      _make(shared, sharedName, sharedId, {...photos}..remove(id));
 
   /// Makes [groups] of photo [fromId] the shared preset.
   ///
@@ -84,12 +103,13 @@ class BatchLook {
         next[e.key] = e.value;
       }
     }
-    return _make(newShared, null, next);
+    return _make(newShared, null, null, next);
   }
 
   Map<String, dynamic> toJson() => {
     'shared': shared.toJson(),
     'sharedName': sharedName,
+    'sharedId': sharedId,
     'photos': {
       for (final id in (photos.keys.toList()..sort()))
         '$id': photos[id]!.toJson(),
@@ -99,6 +119,7 @@ class BatchLook {
   factory BatchLook.fromJson(Map<String, dynamic> json) {
     final rawShared = json['shared'];
     final rawName = json['sharedName'];
+    final rawId = json['sharedId'];
     final rawPhotos = json['photos'];
     final photos = <int, SettingsPatch>{};
     if (rawPhotos is Map) {
@@ -115,6 +136,7 @@ class BatchLook {
           ? SettingsPatch.fromJson(Map<String, dynamic>.from(rawShared))
           : SettingsPatch(),
       rawName is String ? rawName : null,
+      rawId is String ? rawId : null,
       photos,
     );
   }

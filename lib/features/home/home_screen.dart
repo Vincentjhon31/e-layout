@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/rendering.dart' show OverflowBoxFit;
 
 import '../../app_info.dart';
 import '../../platform/device_noun.dart';
@@ -11,8 +12,8 @@ import '../../ui/widgets/note_box.dart';
 import '../../ui/widgets/sheet_scaffold.dart';
 import '../about/update_controller.dart';
 import '../about/whats_new.dart';
-import 'home_controller.dart';
 import 'export_job.dart';
+import 'home_controller.dart';
 import 'home_drop.dart';
 import 'layout_strip.dart';
 import 'options_sheet.dart';
@@ -38,12 +39,7 @@ class HomeActions {
 
 class HomeScreen extends StatefulWidget {
   /// [updates] is null in tests, so no start-up checks run there.
-  const HomeScreen({
-    super.key,
-    required this.controller,
-    this.actions = const HomeActions(),
-    this.updates,
-  });
+  const HomeScreen({super.key, required this.controller, this.actions = const HomeActions(), this.updates});
 
   final HomeController controller;
   final HomeActions actions;
@@ -93,34 +89,24 @@ class _HomeScreenState extends State<HomeScreen> {
         controller: controller,
         layoutRowRect: _layoutRowRect,
         child: ListenableBuilder(
-          listenable: Listenable.merge([controller, ?widget.updates]),
-          builder: (context, _) => Column(
-            children: [
-              Expanded(
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: AppMetrics.contentMaxWidth,
-                    ),
-                    child: _Body(
-                      controller: controller,
-                      actions: widget.actions,
-                      updates: widget.updates,
-                      layoutRowKey: _layoutRowKey,
-                    ),
-                  ),
+        listenable: Listenable.merge([controller, ?widget.updates]),
+        builder: (context, _) => Column(
+          children: [
+            Expanded(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: AppMetrics.contentMaxWidth),
+                  child: _Body(controller: controller, actions: widget.actions, updates: widget.updates, layoutRowKey: _layoutRowKey),
                 ),
               ),
-              SaveBar(
-                controller: controller,
-                onOptions: () => showAppSheet<void>(
-                  context,
-                  (_) => OptionsSheet(controller: controller),
-                ),
-              ),
-            ],
-          ),
+            ),
+            SaveBar(
+              controller: controller,
+              onOptions: () => showAppSheet<void>(context, (_) => OptionsSheet(controller: controller)),
+            ),
+          ],
         ),
+      ),
       ),
     );
   }
@@ -139,12 +125,7 @@ Future<void> addPhotosFlow(BuildContext context, HomeController controller) {
 }
 
 class _Body extends StatelessWidget {
-  const _Body({
-    required this.controller,
-    required this.actions,
-    this.updates,
-    this.layoutRowKey,
-  });
+  const _Body({required this.controller, required this.actions, this.updates, this.layoutRowKey});
   final Key? layoutRowKey;
   final HomeController controller;
   final HomeActions actions;
@@ -166,20 +147,16 @@ class _Body extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      kAppName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppText.largeTitle.copyWith(color: c.text),
-                    ),
+                    child: Text(kAppName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.largeTitle.copyWith(color: c.text)),
                   ),
                   AppIconButton(
                     icon: CupertinoIcons.ellipsis_circle,
                     label: 'More',
                     iconSize: 26,
-                    onPressed: actions.moreMenu == null || saving
-                        ? null
-                        : () => actions.moreMenu!(context),
+                    onPressed: actions.moreMenu == null || saving ? null : () => actions.moreMenu!(context),
                   ),
                 ],
               ),
@@ -188,17 +165,11 @@ class _Body extends StatelessWidget {
         ),
         if (updates?.state case WebReloadReady())
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(
-              AppMetrics.gutter,
-              4,
-              AppMetrics.gutter,
-              0,
-            ),
+            padding: const EdgeInsets.fromLTRB(AppMetrics.gutter, 4, AppMetrics.gutter, 0),
             sliver: SliverToBoxAdapter(
               child: NoteBox(
                 kind: NoteKind.info,
-                text:
-                    'A new version of e-Layout is ready.'
+                text: 'A new version of e-Layout is ready.'
                     '${photos.isEmpty ? ' Reload to use it.' : ' Reload to use it. Photos you added will need adding again.'}',
                 actionLabel: 'Reload',
                 onAction: updates!.reload,
@@ -215,24 +186,15 @@ class _Body extends StatelessWidget {
                     layouts: controller.layouts,
                     selectedId: controller.selectedId,
                     onSelect: (item) => controller.selectLayout(item.id),
-                    onActions: (item) =>
-                        actions.layoutActions?.call(context, item),
+                    onActions: (item) => actions.layoutActions?.call(context, item),
                     onAdd: () => actions.addLayout?.call(context),
                   ),
                 )
-              : const SizedBox(
-                  height: 146,
-                  child: Center(child: CupertinoActivityIndicator()),
-                ),
+              : const SizedBox(height: 146, child: Center(child: CupertinoActivityIndicator())),
         ),
         if (notices.isNotEmpty)
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(
-              AppMetrics.gutter,
-              4,
-              AppMetrics.gutter,
-              0,
-            ),
+            padding: const EdgeInsets.fromLTRB(AppMetrics.gutter, 4, AppMetrics.gutter, 0),
             sliver: SliverList.separated(
               itemCount: notices.length,
               separatorBuilder: (_, _) => const SizedBox(height: 8),
@@ -246,37 +208,23 @@ class _Body extends StatelessWidget {
           SliverToBoxAdapter(
             child: IgnorePointer(
               ignoring: saving,
-              child: PresetRow(
-                look: controller.look,
-                onTap: () => showPresetPicker(context, controller),
-              ),
+              child: PresetRow(look: controller.look, onTap: () => showPresetPicker(context, controller)),
             ),
           ),
         SliverToBoxAdapter(
           child: _SectionTitle(
             title: 'Photos',
             count: photos.isEmpty ? null : photos.length,
-            caption: photos.isEmpty
-                ? null
-                : 'Kept on this $deviceNoun: ${formatBytes(controller.keptBytes)}',
+            caption: photos.isEmpty ? null : 'Kept on this $deviceNoun: ${formatBytes(controller.keptBytes)}',
             trailing: photos.isEmpty
                 ? null
-                : AppButton.plain(
-                    label: 'Clear',
-                    onPressed: saving
-                        ? null
-                        : () => _confirmClear(context, controller),
-                  ),
+                : AppButton.plain(label: 'Clear', onPressed: saving ? null : () => _confirmClear(context, controller)),
           ),
         ),
         if (photos.isEmpty)
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: AppMetrics.gutter),
-            sliver: SliverToBoxAdapter(
-              child: EmptyPhotos(
-                onTap: saving ? null : () => addPhotosFlow(context, controller),
-              ),
-            ),
+            sliver: SliverToBoxAdapter(child: EmptyPhotos(onTap: saving ? null : () => addPhotosFlow(context, controller))),
           )
         else
           PhotoGrid(
@@ -294,15 +242,11 @@ class _Body extends StatelessWidget {
   }
 }
 
-Future<void> _confirmClear(
-  BuildContext context,
-  HomeController controller,
-) async {
+Future<void> _confirmClear(BuildContext context, HomeController controller) async {
   final ok = await showConfirm(
     context,
     title: 'Clear all photos?',
-    message:
-        'The photos and their edits are removed from e-Layout. Your original photos are not touched.',
+    message: 'The photos and their edits are removed from e-Layout. Your original photos are not touched.',
     confirmLabel: 'Clear',
     destructive: true,
   );
@@ -310,12 +254,7 @@ Future<void> _confirmClear(
 }
 
 class _SectionTitle extends StatelessWidget {
-  const _SectionTitle({
-    required this.title,
-    this.count,
-    this.caption,
-    this.trailing,
-  });
+  const _SectionTitle({required this.title, this.count, this.caption, this.trailing});
   final String title;
   final int? count;
   final String? caption;
@@ -330,34 +269,20 @@ class _SectionTitle extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            height: 44,
+            height: caption == null ? 44 : 36,
             child: Row(
               children: [
                 Text(title, style: AppText.title.copyWith(color: c.text)),
                 if (count != null) ...[
                   const SizedBox(width: 8),
-                  Text(
-                    '$count',
-                    style: AppText.title.copyWith(
-                      color: c.secondary,
-                      fontWeight: FontWeight.w400,
-                      fontFeatures: AppText.tabular,
-                    ),
-                  ),
+                  Text('$count', style: AppText.title.copyWith(color: c.secondary, fontWeight: FontWeight.w400, fontFeatures: AppText.tabular)),
                 ],
                 const Spacer(),
-                ?trailing,
+                if (trailing != null) OverflowBox(maxHeight: 44, fit: OverflowBoxFit.deferToChild, child: trailing),
               ],
             ),
           ),
-          if (caption != null)
-            Transform.translate(
-              offset: const Offset(0, -6),
-              child: Text(
-                caption!,
-                style: AppText.caption.copyWith(color: c.secondary),
-              ),
-            ),
+          if (caption != null) Text(caption!, style: AppText.caption.copyWith(color: c.secondary)),
         ],
       ),
     );

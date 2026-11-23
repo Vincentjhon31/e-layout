@@ -193,6 +193,32 @@ void main() {
     expect(c.presets, isEmpty);
   });
 
+  ptest('the check follows the preset id, not its name', (tester) async {
+    final c = await ready(tester);
+    final a = (await tester.runAsync(() => addPreset(c, 'Same', 0.3)))!;
+    await tester.runAsync(() => addPreset(c, 'Same', 0.6));
+    await tester.runAsync(() => c.choosePresetForAll(a));
+    expect(c.look.sharedId, a.id);
+    await pumpHome(tester, c);
+    await openPicker(tester);
+    expect(find.byKey(Key('preset-check-${a.id}')), findsOneWidget);
+    expect(find.byIcon(CupertinoIcons.checkmark), findsOneWidget);
+  });
+
+  ptest('deleting the current preset keeps the look and shows Custom', (
+    tester,
+  ) async {
+    final c = await ready(tester);
+    final a = (await tester.runAsync(() => addPreset(c, 'Warm', 0.3)))!;
+    await tester.runAsync(() => c.choosePresetForAll(a));
+    await tester.runAsync(() => c.removePreset(a));
+    expect(c.look.sharedId, isNull);
+    expect(c.look.sharedName, isNull);
+    expect(c.look.shared.isEmpty, isFalse);
+    await pumpHome(tester, c);
+    expect(find.text('Custom'), findsOneWidget);
+  });
+
   ptest('Import shows the returned line as a toast', (tester) async {
     final c = await ready(tester);
     (c.picker as FakePhotoPicker).nextFiles = [

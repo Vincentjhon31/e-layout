@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
@@ -179,8 +180,8 @@ class _PresetPickerState extends State<PresetPicker> {
 
   bool _isCurrent(Preset? p) {
     final look = c.look;
-    if (p == null) return look.sharedName == null && look.shared.isEmpty;
-    return look.sharedName == p.name;
+    if (p == null) return look.sharedId == null && look.shared.isEmpty;
+    return look.sharedId == p.id;
   }
 
   Future<void> _choose(Preset? p) async {
@@ -226,78 +227,101 @@ class _PresetPickerState extends State<PresetPicker> {
         return SheetScaffold(
           title: 'Presets',
           scrollable: false,
-          child: ListView.builder(
-            shrinkWrap: true,
-            padding: EdgeInsets.zero,
-            itemCount: items.length,
-            itemBuilder: (context, i) {
-              final item = items[i];
-              switch (item) {
-                case _Header(:final title):
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
-                    child: Text(
-                      title.toUpperCase(),
-                      style: AppText.section.copyWith(color: colors.secondary),
-                    ),
-                  );
-                case _Row(:final preset, :final first, :final last):
-                  final row = _PresetRowTile(
-                    key: ValueKey(preset?.id ?? 'none'),
-                    preset: preset,
-                    thumbs: _thumbs,
-                    current: _isCurrent(preset),
-                    first: first,
-                    last: last,
-                    onTap: () => _choose(preset),
-                    onActions: preset == null ? null : () => _actions(preset),
-                  );
-                  return preset == null
-                      ? row
-                      : Dismissible(
-                          key: ValueKey('swipe-${preset.id}'),
-                          direction: DismissDirection.endToStart,
-                          confirmDismiss: (_) async {
-                            _actions(preset);
-                            return false;
-                          },
-                          background: const SizedBox.shrink(),
-                          secondaryBackground: Align(
-                            alignment: Alignment.centerRight,
-                            child: Padding(
-                              padding: const EdgeInsets.only(right: 20),
-                              child: Icon(
-                                CupertinoIcons.ellipsis,
-                                color: colors.secondary,
+          child: SizedBox(
+            height: math.min(
+              _height(items),
+              MediaQuery.sizeOf(context).height * 0.9 - 80,
+            ),
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              itemCount: items.length,
+              itemBuilder: (context, i) {
+                final item = items[i];
+                switch (item) {
+                  case _Header(:final title):
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
+                      child: Text(
+                        title.toUpperCase(),
+                        style: AppText.section.copyWith(
+                          color: colors.secondary,
+                        ),
+                      ),
+                    );
+                  case _Row(:final preset, :final first, :final last):
+                    final row = _PresetRowTile(
+                      key: ValueKey(preset?.id ?? 'none'),
+                      preset: preset,
+                      thumbs: _thumbs,
+                      current: _isCurrent(preset),
+                      first: first,
+                      last: last,
+                      onTap: () => _choose(preset),
+                      onActions: preset == null ? null : () => _actions(preset),
+                    );
+                    return preset == null
+                        ? row
+                        : Dismissible(
+                            key: ValueKey('swipe-${preset.id}'),
+                            direction: DismissDirection.endToStart,
+                            confirmDismiss: (_) async {
+                              _actions(preset);
+                              return false;
+                            },
+                            background: const SizedBox.shrink(),
+                            secondaryBackground: Align(
+                              alignment: Alignment.centerRight,
+                              child: Padding(
+                                padding: const EdgeInsets.only(right: 20),
+                                child: Icon(
+                                  CupertinoIcons.ellipsis,
+                                  color: colors.secondary,
+                                ),
                               ),
                             ),
-                          ),
-                          child: row,
-                        );
-                case _Note():
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-                    child: Text(
-                      kNoPresetsText,
-                      textAlign: TextAlign.center,
-                      style: AppText.subhead.copyWith(color: colors.secondary),
-                    ),
-                  );
-                case _ImportButton():
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 20),
-                    child: AppButton.tinted(
-                      label: 'Import a Lightroom preset',
-                      icon: CupertinoIcons.square_arrow_down,
-                      onPressed: _importing ? null : _import,
-                    ),
-                  );
-              }
-            },
+                            child: row,
+                          );
+                  case _Note():
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+                      child: Text(
+                        kNoPresetsText,
+                        textAlign: TextAlign.center,
+                        style: AppText.subhead.copyWith(
+                          color: colors.secondary,
+                        ),
+                      ),
+                    );
+                  case _ImportButton():
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 20),
+                      child: AppButton.tinted(
+                        label: 'Import a Lightroom preset',
+                        icon: CupertinoIcons.square_arrow_down,
+                        onPressed: _importing ? null : _import,
+                      ),
+                    );
+                }
+              },
+            ),
           ),
         );
       },
     );
+  }
+
+  // The height the rows need, so the sheet is only as tall as its content.
+  double _height(List<_Item> items) {
+    var h = 0.0;
+    for (final i in items) {
+      h += switch (i) {
+        _Header() => 46,
+        _Row() => kPresetThumb + 16,
+        _Note() => 86,
+        _ImportButton() => 20 + AppMetrics.buttonHeight,
+      };
+    }
+    return h;
   }
 }
 
