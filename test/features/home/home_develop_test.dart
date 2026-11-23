@@ -1,0 +1,445 @@
+import 'dart:typed_data';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
+import 'package:pio_photo_layout/core/codec/png_encoder.dart';
+import 'package:pio_photo_layout/core/develop/photo_developer.dart';
+import 'package:pio_photo_layout/core/develop/settings.dart';
+import 'package:pio_photo_layout/core/model/layout_doc.dart';
+import 'package:pio_photo_layout/core/store/batch_store.dart';
+import 'package:pio_photo_layout/core/store/batch_store_memory.dart';
+import 'package:pio_photo_layout/core/store/font_store_memory.dart';
+import 'package:pio_photo_layout/core/store/layout_store_memory.dart';
+import 'package:pio_photo_layout/core/store/preset_store_memory.dart';
+import 'package:pio_photo_layout/core/store/settings_store.dart';
+import 'package:pio_photo_layout/features/home/home_controller.dart';
+import 'package:pio_photo_layout/platform/file_sharer.dart';
+import 'package:pio_photo_layout/platform/gallery_saver.dart';
+import 'package:pio_photo_layout/platform/photo_picker.dart';
+import 'package:pio_photo_layout/platform/temp_files_memory.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../core/presets/fixtures.dart';
+import 'home_controller_test.dart' show picked, png;
+
+/// Puts nothing: every write fails, as on a full or locked disk.
+class FailingBatchStore extends MemoryBatchStore {
+  @override
+  Future<String> putPhoto(String name, Uint8List bytes) =>
+      Future.error(StateError('The disk is full.'));
+
+  @override
+  Future<void> saveManifest(BatchManifest m) =>
+      Future.error(StateError('The disk is full.'));
+}
+
+class Stores {
+  final batch = MemoryBatchStore();
+  final presets = MemoryPresetStore();
+}
+
+class Rig {
+  Rig(this.stores, {PhotoDeveloper? developer, BatchStore? batch}) {
+    controller = HomeController(
+      layoutStore: MemoryLayoutStore(),
+      settingsStore: SettingsStore(),
+      picker: FakePhotoPicker(),
+      saver: saver,
+      sharer: sharer,
+      temp: MemoryTempFiles(),
+      fontStore: MemoryFontStore(),
+      presetStore: stores.presets,
+      batchStore: batch ?? stores.batch,
+      developer: developer,
+      bundled: () async => [LayoutDoc.blank('Plain')..id = 'office:plain'],
+    );
+  }
+  final Stores stores;
+  final saver = FakeGallerySaver();
+  final sharer = FakeFileSharer();
+  late final HomeController controller;
+}
+
+SettingsPatch exposure(double v) =>
+    SettingsPatch(values: {Setting.exposure: v});
+
+/// Mean of the RGB values of an encoded picture.
+double meanLevel(Uint8List bytes) {
+  final d = img.decodeImage(bytes)!;
+  var sum = 0.0;
+  for (final p in d) {
+    sum += p.r + p.g + p.b;
+  }
+  return sum / (d.width * d.height * 3);
+}
+
+Uint8List grey(int w, int h, int v) {
+  final b = Uint8List(w * h * 4);
+  for (var i = 0; i < w * h; i++) {
+    b[i * 4] = v;
+    b[i * 4 + 1] = v;
+    b[i * 4 + 2] = v;
+    b[i * 4 + 3] = 255;
+  }
+  return b;
+}
+
+void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  testWidgets('photos and edits come back after a restart', (tester) async {
+    await tester.runAsync(() async {
+      final stores = Stores();
+      final a = Rig(stores, developer: CpuDeveloper()).controller;
+      await a.init();
+      await a.addPhotos([
+        picked('a.jpg', png(40, 30)),
+        picked('b.jpg', png(30, 40)),
+      ]);
+      await a.whenIdle();
+      final first = a.photos.first;
+      await a.setLook(a.look.withPhotoPatch(first.id, exposure(1)));
+      await a.whenIdle();
+      expect(first.developed, isNotNull);
+      expect(
+        a.photos.last.developed,
+        isNull,
+        reason: 'a neutral photo keeps its preview',
+      );
+      expect(a.keptBytes, await stores.batch.usedBytes());
+      expect(a.keptBytes, greaterThan(0));
+      final look = a.look.toJson();
+      final ids = [for (final p in a.photos) p.id];
+      a.dispose();
+
+      final b = Rig(stores, developer: CpuDeveloper()).controller;
+      await b.init();
+      await b.whenIdle();
+      expect([for (final p in b.photos) p.name], ['a.jpg', 'b.jpg']);
+      expect([for (final p in b.photos) p.id], ids);
+      expect(b.photos.map((p) => p.status), everyElement(PhotoStatus.ready));
+      expect(
+        [for (final p in b.photos) '${p.width}x${p.height}'],
+        ['40x30', '30x40'],
+      );
+      expect(b.look.toJson(), look);
+      expect(b.hasOwnChanges(b.photos.first), isTrue);
+      expect(b.settingsFor(b.photos.first)[Setting.exposure], 1);
+      expect(b.photos.first.developed, isNotNull);
+      expect(b.photos.first.key, isNotNull);
+
+      // A photo added after the restart gets a new number.
+      await b.addPhotos([picked('c.jpg', png(20, 20))]);
+      await b.whenIdle();
+      final all = [for (final p in b.photos) p.id];
+      expect(all.toSet().length, 3);
+      expect(all.last, greaterThan(ids.reduce((x, y) => x > y ? x : y)));
+      b.dispose();
+    });
+  });
+
+  testWidgets(
+    'a kept photo whose bytes are gone shows the error, the rest restore',
+    (tester) async {
+      await tester.runAsync(() async {
+        final stores = Stores();
+        final a = Rig(stores).controller;
+        await a.init();
+        await a.addPhotos([
+          picked('a.jpg', png(40, 30)),
+          picked('b.jpg', png(30, 40)),
+        ]);
+        await a.whenIdle();
+        await stores.batch.removePhoto(a.photos.first.key!);
+        a.dispose();
+
+        final b = Rig(stores).controller;
+        await b.init();
+        await b.whenIdle();
+        expect(b.photos.length, 2);
+        expect(b.photos.first.status, PhotoStatus.error);
+        expect(b.photos.first.error, "Can't open this file.");
+        expect(b.photos.last.status, PhotoStatus.ready);
+        b.dispose();
+      });
+    },
+  );
+
+  testWidgets('clear empties the store and the look', (tester) async {
+    await tester.runAsync(() async {
+      final stores = Stores();
+      final c = Rig(stores, developer: CpuDeveloper()).controller;
+      await c.init();
+      await c.addPhotos([
+        picked('a.jpg', png(40, 30)),
+        picked('b.jpg', png(30, 40)),
+      ]);
+      await c.whenIdle();
+      final key = c.photos.first.key!;
+      await c.choosePresetForAll(
+        await c.savePreset('Bright', EditSettings.resolve([exposure(0.5)])),
+      );
+      await c.setLook(c.look.withPhotoPatch(c.photos.first.id, exposure(1)));
+      await c.whenIdle();
+      await c.clearPhotos();
+      expect(c.photos, isEmpty);
+      expect(c.look.photos, isEmpty);
+      expect(c.look.shared.isEmpty, isTrue);
+      expect(c.look.sharedName, isNull);
+      expect((await stores.batch.load())?.photos ?? [], isEmpty);
+      await expectLater(stores.batch.readPhoto(key), throwsStateError);
+      expect(c.keptBytes, await stores.batch.usedBytes());
+      expect(c.presets.length, 1, reason: 'presets are not part of the batch');
+      c.dispose();
+
+      final again = Rig(stores).controller;
+      await again.init();
+      await again.whenIdle();
+      expect(again.photos, isEmpty);
+      again.dispose();
+    });
+  });
+
+  testWidgets('choosing a preset for all keeps single-photo changes', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      final stores = Stores();
+      final c = Rig(stores, developer: CpuDeveloper()).controller;
+      await c.init();
+      await c.addPhotos([
+        picked('a.jpg', png(40, 30)),
+        picked('b.jpg', png(30, 40)),
+      ]);
+      await c.whenIdle();
+      final [p1, p2] = c.photos;
+      await c.setLook(c.look.withPhotoPatch(p1.id, exposure(1)));
+      final preset = await c.savePreset(
+        'Bright',
+        EditSettings.resolve([
+          SettingsPatch(values: {Setting.exposure: 0.5, Setting.contrast: 20}),
+        ]),
+      );
+      expect(preset.name, 'Bright');
+      expect(
+        preset.patch.values.length,
+        Setting.values.length,
+        reason: 'the full settings',
+      );
+      expect((await stores.presets.loadPresets()).single.id, preset.id);
+
+      await c.choosePresetForAll(preset);
+      await c.whenIdle();
+      expect(c.look.sharedName, 'Bright');
+      expect(c.settingsFor(p1)[Setting.exposure], 1);
+      expect(c.settingsFor(p1)[Setting.contrast], 20);
+      expect(c.settingsFor(p2)[Setting.exposure], 0.5);
+      expect(c.hasOwnChanges(p1), isTrue);
+      expect(c.hasOwnChanges(p2), isFalse);
+      expect(p2.developed, isNotNull);
+      final saved = (await stores.batch.load())!;
+      expect(saved.look.toJson(), c.look.toJson());
+
+      await c.choosePresetForAll(null);
+      expect(c.look.sharedName, isNull);
+      expect(c.settingsFor(p2).isNeutral, isTrue);
+      expect(c.settingsFor(p1)[Setting.exposure], 1);
+
+      await c.removePreset(preset);
+      expect(c.presets, isEmpty);
+      expect(await stores.presets.loadPresets(), isEmpty);
+      c.dispose();
+    });
+  });
+
+  testWidgets('importing a profile after its preset links them', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      final stores = Stores();
+      final c = Rig(stores, developer: CpuDeveloper()).controller;
+      await c.init();
+      await c.addPhotos([picked('a.jpg', png(40, 30))]);
+      await c.whenIdle();
+      final p = c.photos.single;
+
+      final first = await c.importPresets([
+        picked('a.xmp', bytes(presetXmp())),
+      ]);
+      expect(first, contains('needs the profile'));
+      expect(c.presets.single.name, 'Soft Test');
+      await c.choosePresetForAll(c.presets.single);
+      await c.whenIdle();
+      expect(c.settingsFor(p).profile.id, lookUuid);
+      expect(c.profileFor(c.settingsFor(p)), isNull);
+      final before = p.developedKey;
+      expect(before, isNotNull);
+
+      final second = await c.importPresets([
+        picked('look.xmp', bytes(lookXmp())),
+      ]);
+      expect(second, 'Imported the profile "Test Look".');
+      expect(c.profiles.keys, [lookUuid]);
+      expect(c.profileFor(c.settingsFor(p)), isNotNull);
+      expect((await stores.presets.loadProfiles()).single.id, lookUuid);
+      await c.whenIdle();
+      expect(
+        p.developedKey,
+        isNot(before),
+        reason: 'the thumbnail is made again with the profile',
+      );
+      expect(c.profileFor(EditSettings.resolve([])), isNull);
+      c.dispose();
+
+      // Presets and profiles are kept.
+      final again = Rig(stores).controller;
+      await again.init();
+      expect(again.presets.single.name, 'Soft Test');
+      expect(again.profiles.keys, [lookUuid]);
+      again.dispose();
+    });
+  });
+
+  testWidgets('a file over 300 MB is skipped without reading it', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      final c = Rig(Stores(), developer: CpuDeveloper()).controller;
+      await c.init();
+      var read = false;
+      final huge = PickedPhoto(
+        name: 'huge.xmp',
+        size: 301 * 1024 * 1024,
+        readBytes: () async {
+          read = true;
+          return Uint8List(0);
+        },
+      );
+      final line = await c.importPresets([
+        huge,
+        picked('a.xmp', bytes(presetXmp())),
+      ]);
+      expect(read, isFalse);
+      expect(line, endsWith(' Some files were too big to read.'));
+      expect(' Some files were too big to read.'.allMatches(line).length, 1);
+      expect(c.presets.single.name, 'Soft Test');
+      c.dispose();
+    });
+  });
+
+  testWidgets("saving uses each photo's own settings", (tester) async {
+    await tester.runAsync(() async {
+      final c = Rig(Stores(), developer: CpuDeveloper());
+      await c.controller.init();
+      final source = encodePng(grey(24, 16, 90), 24, 16);
+      await c.controller.addPhotos([
+        picked('a.png', source),
+        picked('b.png', source),
+      ]);
+      await c.controller.whenIdle();
+      final [p1, _] = c.controller.photos;
+      await c.controller.setLook(
+        c.controller.look.withPhotoPatch(p1.id, exposure(1)),
+      );
+      await c.controller.saveAll();
+      expect(c.saver.names, ['a_PIO.jpg', 'b_PIO.jpg']);
+      final a = meanLevel(c.saver.files[0]), b = meanLevel(c.saver.files[1]);
+      expect(a, greaterThan(b + 20), reason: 'photo 1 is brighter ($a vs $b)');
+      expect(b, closeTo(90, 4));
+
+      final one = await c.controller.saveOne(p1);
+      expect(one, isNotNull);
+      expect(meanLevel(c.saver.files.last), closeTo(a, 2));
+      c.controller.dispose();
+    });
+  });
+
+  testWidgets('removing a photo drops its overrides', (tester) async {
+    await tester.runAsync(() async {
+      final stores = Stores();
+      final c = Rig(stores, developer: CpuDeveloper()).controller;
+      await c.init();
+      await c.addPhotos([
+        picked('a.jpg', png(40, 30)),
+        picked('b.jpg', png(30, 40)),
+      ]);
+      await c.whenIdle();
+      final [p1, p2] = c.photos;
+      await c.setLook(
+        c.look
+            .withPhotoPatch(p1.id, exposure(1))
+            .withPhotoPatch(p2.id, exposure(-1)),
+      );
+      await c.whenIdle();
+      final key = p1.key!;
+      await c.removePhoto(p1.id);
+      expect(c.photos, [p2]);
+      expect(c.hasOwnChanges(p2), isTrue);
+      expect(c.look.hasOwnChanges(p1.id), isFalse);
+      await expectLater(stores.batch.readPhoto(key), throwsStateError);
+      final saved = (await stores.batch.load())!;
+      expect([for (final p in saved.photos) p.name], ['b.jpg']);
+      expect(saved.look.photos.keys, [p2.id]);
+      expect(c.keptBytes, await stores.batch.usedBytes());
+      c.dispose();
+    });
+  });
+
+  testWidgets('batch store failure shows the note', (tester) async {
+    await tester.runAsync(() async {
+      final c = Rig(
+        Stores(),
+        developer: CpuDeveloper(),
+        batch: FailingBatchStore(),
+      ).controller;
+      await c.init();
+      expect(c.batchOk, isTrue);
+      await c.addPhotos([picked('a.jpg', png(40, 30))]);
+      await c.whenIdle();
+      expect(c.batchOk, isFalse);
+      final p = c.photos.single;
+      expect(
+        p.status,
+        PhotoStatus.ready,
+        reason: 'the photo stays for this visit',
+      );
+      expect(p.key, isNull);
+      expect(
+        c.notices.map((n) => n.text),
+        contains(
+          "Photos can't be kept on this phone, so they will be gone when the app closes.",
+        ),
+      );
+      expect(c.editingAvailable, isTrue);
+      c.dispose();
+    });
+  });
+
+  testWidgets('without a developer editing is off and saving is as before', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      final c = Rig(Stores());
+      await c.controller.init();
+      expect(c.controller.editingAvailable, isFalse);
+      expect(
+        c.controller.notices.map((n) => n.text),
+        contains("Photo editing isn't available on this phone."),
+      );
+      await c.controller.addPhotos([picked('a.jpg', png(30, 20))]);
+      await c.controller.whenIdle();
+      await c.controller.setLook(
+        c.controller.look.withPhotoPatch(
+          c.controller.photos.single.id,
+          exposure(1),
+        ),
+      );
+      await c.controller.whenIdle();
+      expect(c.controller.photos.single.developed, isNull);
+      await c.controller.saveAll();
+      expect(c.saver.names, ['a_PIO.jpg']);
+      expect(c.controller.message, startsWith('Saved 1 photo'));
+      c.controller.dispose();
+    });
+  });
+}

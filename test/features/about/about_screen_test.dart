@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pio_photo_layout/core/develop/photo_developer.dart';
+import 'package:pio_photo_layout/core/store/batch_store_memory.dart';
+import 'package:pio_photo_layout/core/store/preset_store_memory.dart';
 import 'package:pio_photo_layout/core/store/font_store_memory.dart';
 import 'package:pio_photo_layout/core/store/layout_store_memory.dart';
 import 'package:pio_photo_layout/core/store/settings_store.dart';
@@ -209,6 +212,9 @@ void main() {
       saver: FakeGallerySaver(),
       sharer: FakeFileSharer(),
       temp: MemoryTempFiles(),
+      presetStore: MemoryPresetStore(),
+      batchStore: MemoryBatchStore(),
+      developer: CpuDeveloper(),
       fontStore: MemoryFontStore(),
     );
     await tester.runAsync(() async {

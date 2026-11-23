@@ -7,16 +7,25 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 
 import '../../core/analysis/frame_split.dart';
+import '../../core/develop/batch_look.dart';
+import '../../core/develop/photo_developer.dart';
+import '../../core/develop/profile_table.dart';
+import '../../core/develop/settings.dart';
 import '../../core/export/photo_exporter.dart';
 import '../../core/fonts/font_registry.dart';
 import '../../core/model/layout_codec.dart';
 import '../../core/model/layout_doc.dart';
 import '../../core/model/layout_ops.dart';
 import '../../core/render/layout_prep.dart';
+import '../../core/presets/preset.dart';
+import '../../core/presets/preset_codec.dart';
+import '../../core/presets/preset_import.dart';
 import '../../core/render/photo_geometry.dart';
+import '../../core/store/batch_store.dart';
 import '../../core/store/bundled_layouts.dart';
 import '../../core/store/font_store.dart';
 import '../../core/store/layout_store.dart';
+import '../../core/store/preset_store.dart';
 import '../../core/store/settings_store.dart';
 import '../../platform/file_sharer.dart';
 import '../../platform/gallery_saver.dart';
@@ -32,6 +41,11 @@ const int kPreviewEdge = 480;
 /// Warn when a layout picture gets enlarged more than this (app.js SOFT_SCALE).
 const double kSoftScale = 1.5;
 
+/// Preset files bigger than this are not read.
+const int kPresetFileCap = 300 * 1024 * 1024;
+
+const String _tooBigLine = ' Some files were too big to read.';
+
 class LayoutItem {
   LayoutItem(this.doc, this.builtin, this.prep);
   LayoutDoc doc;
@@ -46,13 +60,22 @@ class LayoutItem {
 enum PhotoStatus { loading, ready, error }
 
 class PhotoItem {
-  PhotoItem(this.id, this.source) : name = source.name;
+  PhotoItem(this.id, this.source, {this.key}) : name = source.name;
   final int id;
   final PickedPhoto source;
   final String name;
+
+  /// Where the batch store keeps this photo's bytes (null when it isn't kept).
+  final String? key;
   PhotoStatus status = PhotoStatus.loading;
   int width = 0, height = 0;
   ui.Image? preview;
+
+  /// [preview] with the photo's edits (null when they are neutral).
+  ui.Image? developed;
+
+  /// The settings and profile [developed] was made with.
+  String? developedKey;
   String? error;
 }
 
@@ -90,9 +113,14 @@ class HomeController extends ChangeNotifier {
     Future<List<LayoutDoc>> Function()? bundled,
     FontStore? fontStore,
     this.convertFont,
-  })  : exporter = exporter ?? PhotoExporter(),
+    PresetStore? presetStore,
+    BatchStore? batchStore,
+    this.developer,
+  })  : exporter = exporter ?? PhotoExporter(developer: developer),
         bundled = bundled ?? loadBundledLayouts,
-        fontStore = fontStore ?? createFontStore();
+        fontStore = fontStore ?? createFontStore(),
+        presetStore = presetStore ?? createPresetStore(),
+        batchStore = batchStore ?? createBatchStore();
 
   final LayoutStore layoutStore;
   final SettingsStore settingsStore;
@@ -108,6 +136,32 @@ class HomeController extends ChangeNotifier {
 
   /// Turns WOFF font bytes into TTF (null when it can't).
   final FontConverter? convertFont;
+
+  /// Presets and colour profiles kept on this device.
+  final PresetStore presetStore;
+
+  /// The photos and their edits, kept between visits.
+  final BatchStore batchStore;
+
+  /// Applies photo edits; null when it could not be loaded here.
+  final PhotoDeveloper? developer;
+
+  List<Preset> presets = [];
+
+  /// Colour profiles by id.
+  Map<String, Profile> profiles = {};
+
+  /// The shared preset and each photo's own changes.
+  BatchLook look = const BatchLook();
+
+  /// Bytes the kept batch takes on this device.
+  int keptBytes = 0;
+
+  /// False once the batch store failed: photos may not survive a restart.
+  bool batchOk = true;
+
+  /// False when the developer could not be loaded.
+  bool get editingAvailable => developer != null;
 
   List<LayoutItem> layouts = [];
   String? selectedId;
@@ -128,6 +182,11 @@ class HomeController extends ChangeNotifier {
   // Created lazily, in the zone of the first add (a future made earlier would
   // deliver its callbacks in the zone it was made in).
   Future<void>? _queue;
+  // Manifest writes, one after another (also created lazily).
+  Future<void>? _manifestQueue;
+  // The photo being developed: its images are freed by that job, not by
+  // remove or clear.
+  PhotoItem? _developing;
   bool _disposed = false;
 
   LayoutItem? get current {
@@ -168,7 +227,91 @@ class HomeController extends ChangeNotifier {
     layouts = list;
     final remembered = list.any((l) => l.id == settings.layoutId);
     selectedId = remembered ? settings.layoutId : (list.isEmpty ? null : list.first.id);
+    await _loadPresets();
+    await _restoreBatch();
     ready = true;
+    _changed();
+  }
+
+  Future<void> _loadPresets() async {
+    try {
+      presets = await presetStore.loadPresets();
+    } catch (e) {
+      debugPrint('Presets are unavailable: $e');
+    }
+    try {
+      profiles = {for (final p in await presetStore.loadProfiles()) p.id: p};
+    } catch (e) {
+      debugPrint('Profiles are unavailable: $e');
+    }
+  }
+
+  /// One photo per kept entry; its bytes are read from the store when needed.
+  Future<void> _restoreBatch() async {
+    BatchManifest? m;
+    try {
+      m = await batchStore.load();
+    } catch (e) {
+      batchOk = false;
+      debugPrint('The kept photos are unavailable: $e');
+    }
+    if (m != null) {
+      var next = m.look;
+      final ids = <int>{};
+      for (final bp in m.photos) {
+        if (!ids.add(bp.id)) continue;
+        final source = _storedSource(bp.key, bp.name, bp.size, bp.modified);
+        final item = PhotoItem(bp.id, source, key: bp.key);
+        photos.add(item);
+        _nextId = math.max(_nextId, bp.id + 1);
+        _queuePreview(item);
+      }
+      // Changes for photos that are no longer kept are dropped.
+      for (final id in m.look.photos.keys) {
+        if (!ids.contains(id)) next = next.withoutPhoto(id);
+      }
+      look = next;
+    }
+    await _measureKept();
+  }
+
+  PickedPhoto _storedSource(String key, String name, int? size, DateTime? modified, {String? path}) =>
+      PickedPhoto(
+          name: name, path: path, readBytes: () => batchStore.readPhoto(key), size: size, modified: modified);
+
+  Future<void> _measureKept() async {
+    try {
+      keptBytes = await batchStore.usedBytes();
+    } catch (e) {
+      batchOk = false;
+      debugPrint('The kept photos could not be measured: $e');
+    }
+  }
+
+  /// Writes the manifest (the photos kept now and the look), then measures.
+  Future<void> _saveManifest() {
+    final next = (_manifestQueue ?? Future<void>.value()).then((_) => _writeManifest());
+    _manifestQueue = next;
+    return next;
+  }
+
+  Future<void> _writeManifest() async {
+    if (_disposed) return;
+    final m = BatchManifest(
+      photos: [
+        for (final p in photos)
+          if (p.key != null)
+            BatchPhoto(id: p.id, name: p.name, key: p.key!, size: p.source.size, modified: p.source.modified),
+      ],
+      look: look,
+    );
+    try {
+      await batchStore.saveManifest(m);
+    } catch (e) {
+      batchOk = false;
+      debugPrint('The kept photos could not be saved: $e');
+    }
+    await _measureKept();
     _changed();
   }
 
@@ -238,16 +381,44 @@ class HomeController extends ChangeNotifier {
       if (known.add(f.key)) fresh.add(f);
     }
     fresh.sort((a, b) => naturalCompare(a.name, b.name));
-    for (final f in fresh) {
-      final item = PhotoItem(_nextId++, f);
-      photos.add(item);
-      _queue = (_queue ?? Future<void>.value()).then((_) => _loadPreview(item)).catchError((Object e) {
-        debugPrint('Preview failed: $e');
-      });
-    }
     message = '';
+    for (final f in fresh) {
+      final item = await _keep(f);
+      photos.add(item);
+      _queuePreview(item);
+      _changed();
+    }
     _changed();
+    if (fresh.isNotEmpty) await _saveManifest();
   }
+
+  /// Copies [f]'s bytes into the batch store. When that fails the photo stays
+  /// for this visit only.
+  Future<PhotoItem> _keep(PickedPhoto f) async {
+    final id = _nextId++;
+    final Uint8List bytes;
+    try {
+      bytes = await f.readBytes();
+    } catch (_) {
+      return PhotoItem(id, f); // unreadable: its preview shows the error
+    }
+    try {
+      final key = await batchStore.putPhoto(f.name, bytes);
+      return PhotoItem(id, _storedSource(key, f.name, f.size, f.modified, path: f.path), key: key);
+    } catch (e) {
+      batchOk = false;
+      debugPrint('Could not keep ${f.name}: $e');
+      return PhotoItem(id, f);
+    }
+  }
+
+  void _enqueue(Future<void> Function() job) {
+    _queue = (_queue ?? Future<void>.value()).then((_) => job()).catchError((Object e) {
+      debugPrint('Preview failed: $e');
+    });
+  }
+
+  void _queuePreview(PhotoItem item) => _enqueue(() => _loadPreview(item));
 
   /// Completes when every queued preview has loaded.
   Future<void> whenIdle() async {
@@ -295,25 +466,227 @@ class HomeController extends ChangeNotifier {
         ..error = "Can't open this file.";
     }
     _changed();
+    final dev = developer;
+    if (dev != null && p.preview != null) {
+      await _developThumb(p);
+      dev.clearCache();
+    }
   }
 
-  void removePhoto(int id) {
+  /// What [p]'s thumbnail depends on: its settings and the profile table.
+  String _thumbKey(EditSettings s) {
+    final table = profileFor(s);
+    return '${s.key}|${table == null ? '' : identityHashCode(table)}';
+  }
+
+  /// Makes [p]'s developed thumbnail again when its settings changed.
+  Future<void> _developThumb(PhotoItem p) async {
+    final dev = developer;
+    final src = p.preview;
+    if (dev == null || src == null || _disposed || !photos.contains(p) || p.width <= 0) return;
+    final s = settingsFor(p);
+    final k = _thumbKey(s);
+    if (k == p.developedKey) return;
+    ui.Image? next;
+    _developing = p;
+    try {
+      if (!s.isNeutral) {
+        next = await dev.develop(
+          src,
+          s,
+          profile: profileFor(s),
+          scale: src.width / p.width,
+          fullSize: ui.Size(src.width.toDouble(), src.height.toDouble()),
+          lutSize: 33,
+        );
+      }
+    } catch (e) {
+      debugPrint('Could not develop ${p.name}: $e');
+    } finally {
+      _developing = null;
+    }
+    if (_disposed || !photos.contains(p)) {
+      next?.dispose();
+      _release(p);
+      return;
+    }
+    p.developed?.dispose();
+    p
+      ..developed = next
+      ..developedKey = k;
+    _changed();
+  }
+
+  /// Makes the thumbnails whose settings changed again, one after another.
+  void _developChanged() {
+    if (developer == null) return;
+    _enqueue(() async {
+      for (final p in [...photos]) {
+        await _developThumb(p);
+      }
+      developer?.clearCache();
+    });
+  }
+
+  /// Frees [p]'s images (left to the develop job while it uses them).
+  void _release(PhotoItem p) {
+    if (identical(p, _developing)) return;
+    p.preview?.dispose();
+    p.preview = null;
+    p.developed?.dispose();
+    p.developed = null;
+  }
+
+  Future<void> removePhoto(int id) async {
     final i = photos.indexWhere((p) => p.id == id);
     if (i < 0 || saving) return;
-    photos[i].preview?.dispose();
-    photos.removeAt(i);
+    final p = photos.removeAt(i);
+    _release(p);
+    look = look.withoutPhoto(id);
     message = '';
     _changed();
+    final key = p.key;
+    if (key != null) {
+      try {
+        await batchStore.removePhoto(key);
+      } catch (e) {
+        batchOk = false;
+        debugPrint('Could not remove the kept copy of ${p.name}: $e');
+      }
+    }
+    await _saveManifest();
   }
 
-  void clearPhotos() {
+  /// Removes every photo, its kept copy and the look.
+  Future<void> clearPhotos() async {
     if (saving) return;
     for (final p in photos) {
-      p.preview?.dispose();
+      _release(p);
     }
     photos = [];
+    look = const BatchLook();
     message = '';
     _changed();
+    try {
+      await batchStore.clear();
+    } catch (e) {
+      batchOk = false;
+      debugPrint('Could not clear the kept photos: $e');
+    }
+    await _saveManifest();
+  }
+
+  // ---------- looks and presets ----------
+
+  EditSettings settingsFor(PhotoItem p) => look.settingsFor(p.id);
+
+  bool hasOwnChanges(PhotoItem p) => look.hasOwnChanges(p.id);
+
+  /// The colour table for [s]'s profile; null for none or one not imported
+  /// (the profile's amount then does nothing).
+  ProfileTable? profileFor(EditSettings s) => _profileOf(s.profile)?.table;
+
+  Profile? _profileOf(ProfileRef? ref) {
+    if (ref == null || ref.isNone) return null;
+    final direct = profiles[ref.id];
+    if (direct != null) return direct;
+    final upper = ref.id.trim().toUpperCase();
+    for (final p in profiles.values) {
+      if (p.id.trim().toUpperCase() == upper) return p;
+    }
+    return null;
+  }
+
+  /// Uses [next] as the look: kept at once, changed thumbnails made again.
+  Future<void> setLook(BatchLook next) async {
+    look = next;
+    _changed();
+    _developChanged();
+    await _saveManifest();
+  }
+
+  /// Makes [p] the shared preset (null for none); single-photo changes stay.
+  Future<void> choosePresetForAll(Preset? p) => setLook(look.withPresetForAll(p?.patch, p?.name));
+
+  /// Reads preset and profile files, keeps what they hold and returns the
+  /// line to show. Files over [kPresetFileCap] are not read.
+  Future<String> importPresets(List<PickedPhoto> files) async {
+    final read = <(String, Uint8List)>[];
+    var tooBig = false;
+    for (final f in files) {
+      if ((f.size ?? 0) > kPresetFileCap) {
+        tooBig = true;
+        continue;
+      }
+      try {
+        read.add((f.name, await f.readBytes()));
+      } catch (e) {
+        debugPrint('Could not read ${f.name}: $e');
+      }
+    }
+    final r = importPresetFiles(read, known: profiles);
+    for (final p in r.profiles) {
+      profiles[p.id] = p;
+      try {
+        await presetStore.saveProfile(p);
+      } catch (e) {
+        debugPrint('Profile not kept: $e');
+      }
+    }
+    for (final p in r.presets) {
+      await _keepPreset(p);
+    }
+    var line = r.line;
+    if (tooBig && !line.endsWith(_tooBigLine)) line += _tooBigLine;
+    _changed();
+    if (r.profiles.isNotEmpty) _developChanged();
+    return line;
+  }
+
+  /// Adds [p] to [presets] (replacing one with its id) and stores it.
+  Future<void> _keepPreset(Preset p) async {
+    final i = presets.indexWhere((e) => e.id == p.id);
+    if (i >= 0) {
+      presets[i] = p;
+    } else {
+      presets.add(p);
+    }
+    try {
+      await presetStore.savePreset(p);
+    } catch (e) {
+      debugPrint('Preset not kept: $e');
+    }
+  }
+
+  /// Keeps [s] as a preset of the person's own.
+  Future<Preset> savePreset(String name, EditSettings s) async {
+    final p = Preset(id: uid('P'), name: name, kind: PresetKind.user, created: DateTime.now(), patch: s.toPatch());
+    await _keepPreset(p);
+    _changed();
+    return p;
+  }
+
+  Future<void> removePreset(Preset p) async {
+    presets.removeWhere((e) => e.id == p.id);
+    _changed();
+    try {
+      await presetStore.removePreset(p.id);
+    } catch (e) {
+      debugPrint('Could not delete the preset: $e');
+    }
+  }
+
+  /// Writes `<name>.preset.json` (with its profile) and opens the share sheet.
+  Future<void> sharePreset(Preset p) async {
+    final bytes = encodePresetFile(p, _profileOf(p.patch.profile));
+    final name = '${safeFileName(p.name)}.preset.json';
+    if (!sharer.needsCopies) {
+      await sharer.exportFile(name, bytes);
+      return;
+    }
+    await temp.clear('export');
+    final path = await temp.write('export', name, bytes);
+    await sharer.shareFiles([path]);
   }
 
   // ---------- notices ----------
@@ -358,6 +731,13 @@ class HomeController extends ChangeNotifier {
     if (!storageOk) {
       out.add(Notice(NoteKind.warning,
           "Saved layouts can't be read on this $deviceNoun, so layouts you make or import may be gone when the app closes."));
+    }
+    if (!batchOk) {
+      out.add(Notice(
+          NoteKind.warning, "Photos can't be kept on this $deviceNoun, so they will be gone when the app closes."));
+    }
+    if (!editingAvailable) {
+      out.add(Notice(NoteKind.info, "Photo editing isn't available on this $deviceNoun."));
     }
     return out;
   }
@@ -535,6 +915,14 @@ class HomeController extends ChangeNotifier {
   /// What a photo is saved as: "IMG_1_PIO.jpg".
   String outputName(PhotoItem p) => '${outputStem(p.name, settings.suffix)}.$outputExt';
 
+  /// Renders [p] with its own settings; exactly as before when editing is
+  /// off or the settings are neutral.
+  Future<RenderedPhoto> _render(PhotoItem p, Uint8List bytes, LayoutItem item) {
+    final s = developer == null ? null : settingsFor(p);
+    if (s == null || s.isNeutral) return exporter.render(bytes, item.doc, item.prep, exportSettings);
+    return exporter.render(bytes, item.doc, item.prep, exportSettings, edit: s, profile: profileFor(s));
+  }
+
   Future<void> saveAll() async {
     final item = current;
     if (item == null || saving) return;
@@ -566,7 +954,7 @@ class HomeController extends ChangeNotifier {
         _changed();
         try {
           final bytes = await p.source.readBytes();
-          final out = await exporter.render(bytes, item.doc, item.prep, exportSettings);
+          final out = await _render(p, bytes, item);
           final name = uniqueName(outputStem(p.name, settings.suffix), out.ext, used);
           if (sharer.needsCopies) paths.add(await temp.write('saved', name, out.bytes));
           final where = await saver.saveImage(out.bytes, name);
@@ -611,6 +999,7 @@ class HomeController extends ChangeNotifier {
         } catch (_) {}
       }
     }
+    developer?.clearCache();
     lastSaved = paths;
     job = null;
     message = result;
@@ -630,7 +1019,7 @@ class HomeController extends ChangeNotifier {
   Future<(String name, Uint8List bytes)> _renderOne(PhotoItem p) async {
     final item = current;
     if (item == null) throw StateError('Choose a layout first.');
-    final out = await exporter.render(await p.source.readBytes(), item.doc, item.prep, exportSettings);
+    final out = await _render(p, await p.source.readBytes(), item);
     return ('${outputStem(p.name, settings.suffix)}.${out.ext}', out.bytes);
   }
 
@@ -667,7 +1056,7 @@ class HomeController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     for (final p in photos) {
-      p.preview?.dispose();
+      _release(p);
     }
     for (final l in layouts) {
       l.prep.dispose();

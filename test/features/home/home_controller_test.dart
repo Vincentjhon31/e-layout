@@ -2,6 +2,10 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pio_photo_layout/core/develop/photo_developer.dart';
+import 'package:pio_photo_layout/core/store/batch_store_memory.dart';
+import 'package:pio_photo_layout/core/store/font_store_memory.dart';
+import 'package:pio_photo_layout/core/store/preset_store_memory.dart';
 import 'package:pio_photo_layout/core/codec/png_encoder.dart';
 import 'package:pio_photo_layout/core/model/layout_doc.dart';
 import 'package:pio_photo_layout/core/store/layout_store_memory.dart';
@@ -36,6 +40,10 @@ class Rig {
       saver: saver,
       sharer: sharer,
       temp: MemoryTempFiles(),
+      presetStore: MemoryPresetStore(),
+      batchStore: MemoryBatchStore(),
+      developer: CpuDeveloper(),
+      fontStore: MemoryFontStore(),
       bundled: () async => [
         LayoutDoc.blank('Plain')..id = 'office:plain',
         LayoutDoc.blank('Second')..id = 'office:second',

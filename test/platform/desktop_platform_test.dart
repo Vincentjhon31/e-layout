@@ -4,6 +4,9 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:pio_photo_layout/core/develop/photo_developer.dart';
+import 'package:pio_photo_layout/core/store/batch_store_memory.dart';
+import 'package:pio_photo_layout/core/store/preset_store_memory.dart';
 import 'package:pio_photo_layout/core/model/layout_doc.dart';
 import 'package:pio_photo_layout/core/store/font_store_memory.dart';
 import 'package:pio_photo_layout/core/store/layout_store_memory.dart';
@@ -106,6 +109,9 @@ void main() {
         saver: FakeGallerySaver(),
         sharer: FakeFileSharer(),
         temp: MemoryTempFiles(),
+        presetStore: MemoryPresetStore(),
+        batchStore: MemoryBatchStore(),
+        developer: CpuDeveloper(),
         fontStore: MemoryFontStore(),
         bundled: () async => [LayoutDoc.blank('Plain')..id = 'office:plain'],
       );
@@ -198,6 +204,9 @@ void main() {
         saver: saver,
         sharer: FakeFileSharer(needsCopies: false),
         temp: MemoryTempFiles(),
+        presetStore: MemoryPresetStore(),
+        batchStore: MemoryBatchStore(),
+        developer: CpuDeveloper(),
         fontStore: MemoryFontStore(),
         bundled: () async => [LayoutDoc.blank('Plain')..id = 'office:plain'],
       );
@@ -225,6 +234,9 @@ void main() {
         saver: FolderSaver(pickFolder: () async => null),
         sharer: FakeFileSharer(needsCopies: false),
         temp: MemoryTempFiles(),
+        presetStore: MemoryPresetStore(),
+        batchStore: MemoryBatchStore(),
+        developer: CpuDeveloper(),
         fontStore: MemoryFontStore(),
         bundled: () async => [LayoutDoc.blank('Plain')..id = 'office:plain'],
       );
@@ -248,6 +260,9 @@ void main() {
         saver: ZipSaver(download: (n, z) async => zips.add(n), limit: 3000),
         sharer: FakeFileSharer(needsCopies: false),
         temp: MemoryTempFiles(),
+        presetStore: MemoryPresetStore(),
+        batchStore: MemoryBatchStore(),
+        developer: CpuDeveloper(),
         fontStore: MemoryFontStore(),
         bundled: () async => [LayoutDoc.blank('Plain')..id = 'office:plain'],
       );

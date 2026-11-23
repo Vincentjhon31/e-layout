@@ -1,6 +1,8 @@
 import '../../app_info.dart';
 import 'package:flutter/cupertino.dart';
 
+import '../../core/develop/photo_developer.dart';
+import '../../core/develop/shader_developer.dart';
 import '../../ui/widgets/action_sheet.dart';
 import '../about/about_screen.dart';
 import '../about/update_controller.dart';
@@ -10,6 +12,17 @@ import '../layouts/layout_actions.dart';
 import '../viewer/photo_viewer.dart';
 import 'home_controller.dart';
 import 'home_screen.dart';
+
+/// The GPU developer, or null when this device can't load it (photo editing
+/// is then off and photos are saved as before).
+Future<PhotoDeveloper?> loadDeveloper() async {
+  try {
+    return await ShaderDeveloper.load();
+  } catch (e) {
+    debugPrint('Photo editing is not available: $e');
+    return null;
+  }
+}
 
 /// Connects the home screen to the other screens.
 HomeActions homeActions(

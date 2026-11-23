@@ -1,7 +1,9 @@
 import 'package:flutter/cupertino.dart';
 
 import 'app.dart';
+import 'core/store/batch_store.dart';
 import 'core/store/layout_store.dart';
+import 'core/store/preset_store.dart';
 import 'core/store/settings_store.dart';
 import 'features/about/update_controller.dart';
 import 'features/editor/open_editor.dart';
@@ -15,7 +17,7 @@ import 'platform/platform_services.dart';
 import 'platform/temp_files.dart';
 import 'platform/web_version.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final services = createPlatformServices();
   deviceNoun = services.deviceNoun;
@@ -27,6 +29,9 @@ void main() {
     saver: services.saver,
     sharer: services.sharer,
     temp: createTempFiles(),
+    presetStore: createPresetStore(),
+    batchStore: createBatchStore(),
+    developer: await loadDeveloper(),
   );
   controller.init();
   // The only online parts: update checks (and the font library, which has its own client).

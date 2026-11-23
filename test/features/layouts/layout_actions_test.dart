@@ -3,6 +3,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pio_photo_layout/core/develop/photo_developer.dart';
+import 'package:pio_photo_layout/core/store/batch_store_memory.dart';
+import 'package:pio_photo_layout/core/store/preset_store_memory.dart';
 import 'package:pio_photo_layout/core/codec/png_encoder.dart';
 import 'package:pio_photo_layout/core/fonts/font_registry.dart';
 import 'package:pio_photo_layout/core/model/layout_codec.dart';
@@ -50,6 +53,9 @@ class Rig {
     saver: FakeGallerySaver(),
     sharer: sharer,
     temp: temp,
+    presetStore: MemoryPresetStore(),
+    batchStore: MemoryBatchStore(),
+    developer: CpuDeveloper(),
     fontStore: fonts,
   );
 }

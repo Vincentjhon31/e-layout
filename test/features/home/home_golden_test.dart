@@ -3,6 +3,9 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pio_photo_layout/core/develop/photo_developer.dart';
+import 'package:pio_photo_layout/core/store/batch_store_memory.dart';
+import 'package:pio_photo_layout/core/store/preset_store_memory.dart';
 import 'package:pio_photo_layout/core/render/sample_scene.dart';
 import 'package:pio_photo_layout/core/store/font_store_memory.dart';
 import 'package:pio_photo_layout/core/store/layout_store_memory.dart';
@@ -47,6 +50,9 @@ HomeController newController() => HomeController(
       saver: FakeGallerySaver(),
       sharer: FakeFileSharer(),
       temp: MemoryTempFiles(),
+      presetStore: MemoryPresetStore(),
+      batchStore: MemoryBatchStore(),
+      developer: CpuDeveloper(),
       fontStore: MemoryFontStore(),
     );
 
