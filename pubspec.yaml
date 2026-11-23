@@ -61,6 +61,8 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 flutter:
+  shaders:
+    - shaders/develop.frag
   assets:
     - assets/layouts/
     - assets/img/
