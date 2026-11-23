@@ -400,4 +400,110 @@ void main() {
     ]);
     expect(r.presets.single.patch.grayscale, isTrue);
   });
+
+  group('size caps and hostile input', () {
+    const tooBig = ' Some files were too big to read.';
+
+    test('a zip with more than 500 entries stops reading at 500', () {
+      final files = <String, List<int>>{
+        'a.xmp': presetXmp(look: null).codeUnits,
+        for (var i = 0; i < 600; i++) 'f$i.txt': [1],
+      };
+      final r = importPresetFiles([('many.zip', zipOf(files))]);
+      expect(r.presets, hasLength(1));
+      expect(r.line, 'Imported "Soft Test".$tooBig');
+    });
+
+    test('a zip over the total size cap skips the rest', () {
+      // One 8 MB buffer shared by every entry: tiny once compressed.
+      final block = Uint8List(8 * 1024 * 1024);
+      final files = <String, List<int>>{
+        'a.xmp': presetXmp(look: null).codeUnits,
+        for (var i = 0; i < 34; i++) 'f$i.lrtemplate': block,
+      };
+      final r = importPresetFiles([('huge.zip', zipOf(files))]);
+      expect(r.presets, hasLength(1));
+      expect(r.line, 'Imported "Soft Test".$tooBig');
+    });
+
+    test('a zip entry over the entry cap is skipped, the rest read', () {
+      final z = zipOf({
+        'big.xmp': Uint8List(8 * 1024 * 1024 + 1),
+        'a.xmp': presetXmp(look: null).codeUnits,
+      });
+      final r = importPresetFiles([('p.zip', z)]);
+      expect(r.presets, hasLength(1));
+      expect(r.line, 'Imported "Soft Test".$tooBig');
+    });
+
+    test('an oversized top-level file is skipped', () {
+      final r = importPresetFiles([
+        ('big.xmp', Uint8List(8 * 1024 * 1024 + 1)),
+        ('big.lrtemplate', Uint8List(8 * 1024 * 1024 + 1)),
+      ]);
+      expect(r.presets, isEmpty);
+      expect(r.line, 'No Lightroom presets found in these files.$tooBig');
+    });
+
+    test('a dng whose xmp packet is over 2 MB is skipped', () {
+      final pad = '<!--${'x' * (2 * 1024 * 1024 + 10)}-->';
+      final r = importPresetFiles([
+        ('p.dng', fakeDng(presetXmp(look: null, children: pad))),
+      ]);
+      expect(r.presets, isEmpty);
+      expect(r.line, endsWith(tooBig));
+    });
+
+    test('5000-deep nested XML does not throw', () {
+      final deep = '<crs:Deep>${'<a>' * 5000}${'</a>' * 5000}</crs:Deep>';
+      late ImportResult r;
+      expect(
+        () => r = importPresetFiles([
+          f('deep.xmp', presetXmp(look: null, children: deep)),
+        ]),
+        returnsNormally,
+      );
+      expect(r.line, isNotEmpty);
+    });
+
+    test('an lrtemplate nested deeper than 40 is skipped', () {
+      final open = 'A = ${'{' * 60}';
+      final close = '}' * 60;
+      final r = importPresetFiles([
+        f('d.lrtemplate', lrtemplate(extra: '$open$close,')),
+      ]);
+      expect(r.presets, isEmpty);
+      expect(r.line, 'No Lightroom presets found in these files.');
+    });
+
+    test('a DOCTYPE entity is not expanded', () {
+      final xml =
+          '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e "EXPANDED">]>'
+          '${presetXmp(name: 'A &e; B', look: null)}';
+      late ImportResult r;
+      expect(() => r = importPresetFiles([f('e.xmp', xml)]), returnsNormally);
+      expect(r.presets.single.name, 'A &e; B');
+    });
+
+    test('curve points are sorted by x, last one wins for a repeated x', () {
+      final r = importPresetFiles([
+        f(
+          'c.xmp',
+          presetXmp(
+            look: null,
+            children:
+                '<crs:ToneCurvePV2012Green><rdf:Seq>'
+                '<rdf:li>255, 250</rdf:li><rdf:li>100, 90</rdf:li>'
+                '<rdf:li>0, 0</rdf:li><rdf:li>100, 110</rdf:li>'
+                '</rdf:Seq></crs:ToneCurvePV2012Green>',
+          ),
+        ),
+      ]);
+      expect(r.presets.single.patch.curves[CurveChannel.green], const [
+        CurvePoint(0, 0),
+        CurvePoint(100, 110),
+        CurvePoint(255, 250),
+      ]);
+    });
+  });
 }

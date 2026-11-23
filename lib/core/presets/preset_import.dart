@@ -48,7 +48,27 @@ String _randomId() {
   ].join();
 }
 
-void _read(String name, Uint8List bytes, List<_Found> out, int depth) {
+const _mb = 1024 * 1024;
+const _maxText = 8 * _mb;
+const _maxDng = 200 * _mb;
+const _maxEntries = 500;
+const _maxTotal = 256 * _mb;
+
+/// What a read has used so far, and whether anything was too big.
+class _Budget {
+  bool tooBig = false;
+  int total = 0;
+}
+
+int _cap(String lower) => lower.endsWith('.dng') ? _maxDng : _maxText;
+
+void _read(
+  String name,
+  Uint8List bytes,
+  List<_Found> out,
+  int depth,
+  _Budget budget,
+) {
   if (_isMacLeftover(name)) return;
   final base = _baseName(name);
   final lower = base.toLowerCase();
@@ -61,30 +81,58 @@ void _read(String name, Uint8List bytes, List<_Found> out, int depth) {
       } catch (_) {
         return;
       }
+      var entries = 0;
       for (final f in archive.files) {
         if (!f.isFile || _isMacLeftover(f.name)) continue;
+        if (++entries > _maxEntries) {
+          budget.tooBig = true;
+          break;
+        }
+        // Check the declared size before anything is decompressed.
+        if (f.size > _cap(f.name.toLowerCase()) ||
+            budget.total + f.size > _maxTotal) {
+          budget.tooBig = true;
+          continue;
+        }
         try {
           final data = f.readBytes();
           if (data == null || data.isEmpty) continue;
-          _read(f.name, Uint8List.fromList(data), out, depth + 1);
+          budget.total += data.length;
+          _read(f.name, Uint8List.fromList(data), out, depth + 1, budget);
         } catch (_) {
           continue; // one bad file must not stop the rest
         }
       }
-    } else if (lower.endsWith('.xmp')) {
+      return;
+    }
+    final isXmp = lower.endsWith('.xmp');
+    final isDng = lower.endsWith('.dng');
+    final isTemplate = lower.endsWith('.lrtemplate');
+    if (!isXmp && !isDng && !isTemplate) return;
+    if (bytes.length > _cap(lower)) {
+      budget.tooBig = true;
+      return;
+    }
+    if (isXmp) {
       final p = parseXmp(utf8.decode(bytes, allowMalformed: true));
       if (p != null && (p.isLook || isTrue(p.fields['HasSettings']))) {
         out.add(_Found(base, p));
       }
-    } else if (lower.endsWith('.dng')) {
-      final packet = extractXmpPacket(bytes);
+    } else if (isDng) {
+      final String? packet;
+      try {
+        packet = extractXmpPacket(bytes, maxBytes: 2 * _mb);
+      } on XmpTooBig {
+        budget.tooBig = true;
+        return;
+      }
       final p = packet == null ? null : parseXmp(packet);
       if (p != null &&
           (isTrue(p.fields['HasSettings']) ||
               !patchFromFields(p.fields).isEmpty)) {
         out.add(_Found(base, p));
       }
-    } else if (lower.endsWith('.lrtemplate')) {
+    } else {
       final p = parseLrtemplate(utf8.decode(bytes, allowMalformed: true));
       if (p != null) out.add(_Found(base, p));
     }
@@ -131,8 +179,9 @@ ImportResult importPresetFiles(
   Map<String, Profile> known = const {},
 }) {
   final found = <_Found>[];
+  final budget = _Budget();
   for (final (name, bytes) in files) {
-    _read(name, bytes, found, 0);
+    _read(name, bytes, found, 0, budget);
   }
 
   // Profiles first, so presets can link to them whatever the file order.
@@ -301,6 +350,7 @@ ImportResult importPresetFiles(
       );
     }
   }
+  if (budget.tooBig) b.write(' Some files were too big to read.');
   return ImportResult(
     presets: List.unmodifiable(presets),
     profiles: List.unmodifiable(profileList),

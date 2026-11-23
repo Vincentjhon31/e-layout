@@ -18,13 +18,21 @@ int _find(Uint8List data, List<int> needle, int from) {
   return -1;
 }
 
+/// The packet is bigger than the allowed size.
+class XmpTooBig implements Exception {
+  const XmpTooBig();
+}
+
 /// The first `<x:xmpmeta` to `</x:xmpmeta>` packet in a DNG (or any file),
 /// as text, or null if there is none.
-String? extractXmpPacket(Uint8List data) {
+String? extractXmpPacket(Uint8List data, {int? maxBytes}) {
   final start = _find(data, _open, 0);
   if (start < 0) return null;
   final end = _find(data, _close, start);
   if (end < 0) return null;
+  if (maxBytes != null && end + _close.length - start > maxBytes) {
+    throw const XmpTooBig();
+  }
   return utf8.decode(
     Uint8List.sublistView(data, start, end + _close.length),
     allowMalformed: true,

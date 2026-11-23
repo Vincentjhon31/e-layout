@@ -84,17 +84,17 @@ bool _nonZero(CrsFields f, String name) {
 
 List<CurvePoint>? _curve(List<String>? items) {
   if (items == null) return null;
-  final pts = <CurvePoint>[];
+  final byX = <int, int>{}; // last point for each x wins
   for (final item in items) {
     final parts = item.split(',');
     if (parts.length != 2) continue;
     final x = parseCrsNumber(parts[0]);
     final y = parseCrsNumber(parts[1]);
     if (x == null || y == null) continue;
-    pts.add(CurvePoint(x.round().clamp(0, 255), y.round().clamp(0, 255)));
+    byX[x.round().clamp(0, 255)] = y.round().clamp(0, 255);
   }
-  if (pts.length < 2) return null;
-  return pts;
+  if (byX.length < 2) return null;
+  return [for (final x in byX.keys.toList()..sort()) CurvePoint(x, byX[x]!)];
 }
 
 /// The settings, curves and grayscale switch in [f]. The profile is set by
