@@ -46,13 +46,16 @@ abstract class PhotoDeveloper {
   });
 
   /// The tile overlap, in render pixels, so that tiles cut with this much
-  /// extra on every side and cropped back match one whole render. Pass
-  /// [fullSize] (render pixels, as in [develop]): texture and clarity reach
-  /// a fraction of the long edge. Without it a large photo is assumed, which
-  /// is safe but wider than needed.
-  int margin(EditSettings s, double scale, {ui.Size? fullSize});
+  /// extra on every side and cropped back match one whole render.
+  /// [fullSize] is the whole photo in render pixels, as in [develop]:
+  /// texture and clarity reach a fraction of its long edge.
+  int margin(EditSettings s, double scale, {required ui.Size fullSize});
 
-  /// Frees cached images. The developer can still be used afterwards.
+  /// Frees the cached blurred copies (they hold on to the last sources).
+  /// Call it between photos. The developer can still be used afterwards.
+  void clearCache();
+
+  /// Frees every cached image. The developer can still be used afterwards.
   void dispose();
 }
 
@@ -84,7 +87,10 @@ class CpuDeveloper implements PhotoDeveloper {
   }
 
   @override
-  int margin(EditSettings s, double scale, {ui.Size? fullSize}) => 0;
+  int margin(EditSettings s, double scale, {required ui.Size fullSize}) => 0;
+
+  @override
+  void clearCache() {}
 
   @override
   void dispose() {}
@@ -99,8 +105,12 @@ class CpuDeveloper implements PhotoDeveloper {
 Future<DevelopStats> measureStats(ui.Image smallCopy) async {
   final long = math.max(smallCopy.width, smallCopy.height);
   final blurred = await blurImage(smallCopy, math.max(0.02 * long, 1));
-  final px = await readRgba(blurred);
-  blurred.dispose();
+  final Uint8List px;
+  try {
+    px = await readRgba(blurred);
+  } finally {
+    blurred.dispose();
+  }
   final dark = <double>[];
   for (var i = 0; i < px.length; i += 4 * 7) {
     final m = math.min(px[i], math.min(px[i + 1], px[i + 2]));
@@ -115,18 +125,26 @@ Future<DevelopStats> measureStats(ui.Image smallCopy) async {
 /// An image from straight (not premultiplied) RGBA bytes.
 Future<ui.Image> imageFromRgba(Uint8List rgba, int w, int h) async {
   final buf = await ui.ImmutableBuffer.fromUint8List(rgba);
-  final desc = ui.ImageDescriptor.raw(
-    buf,
-    width: w,
-    height: h,
-    pixelFormat: ui.PixelFormat.rgba8888,
-  );
-  final codec = await desc.instantiateCodec();
-  final frame = await codec.getNextFrame();
-  codec.dispose();
-  desc.dispose();
-  buf.dispose();
-  return frame.image;
+  try {
+    final desc = ui.ImageDescriptor.raw(
+      buf,
+      width: w,
+      height: h,
+      pixelFormat: ui.PixelFormat.rgba8888,
+    );
+    try {
+      final codec = await desc.instantiateCodec();
+      try {
+        return (await codec.getNextFrame()).image;
+      } finally {
+        codec.dispose();
+      }
+    } finally {
+      desc.dispose();
+    }
+  } finally {
+    buf.dispose();
+  }
 }
 
 /// Straight RGBA bytes of [image].

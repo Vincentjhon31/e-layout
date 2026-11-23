@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pio_photo_layout/core/develop/color_pipeline.dart';
 import 'package:pio_photo_layout/core/develop/photo_developer.dart';
+import 'package:pio_photo_layout/core/develop/profile_table.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
 import 'package:pio_photo_layout/core/develop/shader_developer.dart';
 
@@ -12,6 +13,30 @@ import 'develop_images.dart';
 
 EditSettings edit(Map<Setting, double> v) =>
     EditSettings.resolve([SettingsPatch(values: v)]);
+
+/// Develops [src] and returns the output bytes; [src] stays the caller's.
+Future<Uint8List> develop(
+  PhotoDeveloper dev,
+  ui.Image src,
+  EditSettings s, {
+  ProfileTable? profile,
+  double scale = 1,
+  ui.Offset origin = ui.Offset.zero,
+  ui.Size? fullSize,
+}) async {
+  final out = await dev.develop(
+    src,
+    s,
+    profile: profile,
+    scale: scale,
+    origin: origin,
+    fullSize: fullSize,
+  );
+  expect(identical(out, src), false);
+  final px = await readRgba(out);
+  out.dispose();
+  return px;
+}
 
 /// Develops [rgba] (256 x 256) and returns the output bytes.
 Future<Uint8List> run(
@@ -283,13 +308,6 @@ void main() {
         ),
         greaterThanOrEqualTo(18),
       );
-      // Without fullSize the margin assumes a large photo, never less.
-      expect(
-        dev.margin(edit({Setting.clarity: 20}), 1),
-        greaterThanOrEqualTo(
-          dev.margin(edit({Setting.clarity: 20}), 1, fullSize: full),
-        ),
-      );
     });
   });
 
@@ -324,6 +342,174 @@ void main() {
       );
       expect(after.$1, lessThan(before.$1 - 10));
       expect(after.$2, greaterThan(before.$2 * 1.2));
+    });
+  });
+
+  testWidgets('neutral settings with a profile table apply the profile', (
+    t,
+  ) async {
+    await withDev(t, () async {
+      // An inverting table, nodes in the order ProfileTable.identity uses.
+      const n = 5;
+      final rgb = Float32List(n * n * n * 3);
+      var o = 0;
+      for (var b = 0; b < n; b++) {
+        for (var g = 0; g < n; g++) {
+          for (var r = 0; r < n; r++) {
+            rgb[o++] = 1 - r / (n - 1);
+            rgb[o++] = 1 - g / (n - 1);
+            rgb[o++] = 1 - b / (n - 1);
+          }
+        }
+      }
+      final table = ProfileTable(n, rgb);
+      final s = edit({});
+      expect(s.isNeutral, true);
+      final rgba = colourfulRgba();
+      final src = await image(rgba);
+      final out = await develop(dev, src, s, profile: table);
+      src.dispose();
+      final p = ColorPipeline(s, profile: table);
+      expect(p.isIdentity, false);
+      var sum = 0.0;
+      for (var i = 0; i < rgba.length; i += 4) {
+        final c = p.apply(rgba[i] / 255, rgba[i + 1] / 255, rgba[i + 2] / 255);
+        sum +=
+            (out[i] - c.$1 * 255).abs() +
+            (out[i + 1] - c.$2 * 255).abs() +
+            (out[i + 2] - c.$3 * 255).abs();
+      }
+      final mean = sum / (rgba.length / 4 * 3);
+      // ignore: avoid_print
+      print('profile on neutral settings: mean ${mean.toStringAsFixed(3)}');
+      expect(mean, lessThanOrEqualTo(1.5));
+      // Black in, white out: the table really acted.
+      expect(out[1], greaterThan(240));
+    });
+  });
+
+  testWidgets('tiles cut along x and y at scale 0.5 match a whole render', (
+    t,
+  ) async {
+    await withDev(t, () async {
+      final s = edit({
+        Setting.clarity: 40,
+        Setting.vignetteAmount: -40,
+        Setting.grainAmount: 40,
+      });
+      const scale = 0.5;
+      const full = ui.Size(256, 256); // a 512 px photo rendered at half size
+      final m = dev.margin(s, scale, fullSize: full);
+      expect(m, greaterThan(0));
+      final rgba = richRgba(5);
+      final src = await image(rgba);
+      final whole = await develop(dev, src, s, scale: scale, fullSize: full);
+      src.dispose();
+
+      var worst = 0;
+      for (final (tx, ty) in [(0, 0), (1, 0), (0, 1), (1, 1)]) {
+        // The quadrant plus the margin toward the cuts.
+        final x0 = tx == 0 ? 0 : 128 - m, y0 = ty == 0 ? 0 : 128 - m;
+        final w = 128 + m, h = 128 + m;
+        final img = await image(cropRgba(rgba, kSide, x0, y0, w, h), w, h);
+        final px = await develop(
+          dev,
+          img,
+          s,
+          scale: scale,
+          origin: ui.Offset(x0.toDouble(), y0.toDouble()),
+          fullSize: full,
+        );
+        img.dispose();
+        for (var y = ty * 128; y < ty * 128 + 128; y++) {
+          for (var x = tx * 128; x < tx * 128 + 128; x++) {
+            final i = ((y - y0) * w + x - x0) * 4;
+            final j = (y * kSide + x) * 4;
+            for (var k = 0; k < 3; k++) {
+              worst = math.max(worst, (px[i + k] - whole[j + k]).abs());
+            }
+          }
+        }
+      }
+      // ignore: avoid_print
+      print('2-D tiles at scale 0.5: margin $m, max diff $worst levels');
+      expect(worst, lessThanOrEqualTo(2));
+    });
+  });
+
+  testWidgets('two images of the same size through one developer', (t) async {
+    await withDev(t, () async {
+      final s = edit({
+        Setting.exposure: 0.5,
+        Setting.clarity: 30,
+        Setting.sharpenAmount: 60,
+        Setting.noiseLuminance: 30,
+      });
+      final a = await image(richRgba(11));
+      final b = await image(softEdgeRgba(40, 200, 8));
+      final outA = await develop(dev, a, s);
+      final outB = await develop(dev, b, s);
+      final freshA = await ShaderDeveloper.load();
+      final freshB = await ShaderDeveloper.load();
+      try {
+        expect(outB, await develop(freshB, b, s));
+        expect(outA, await develop(freshA, a, s));
+      } finally {
+        freshA.dispose();
+        freshB.dispose();
+        a.dispose();
+        b.dispose();
+      }
+      expect(outA, isNot(outB));
+    });
+  });
+
+  testWidgets('changing exposure after a render re-bakes the colour table', (
+    t,
+  ) async {
+    await withDev(t, () async {
+      final src = await image(colourfulRgba());
+      final s1 = edit({Setting.exposure: 0.5, Setting.clarity: 20});
+      final s2 = edit({Setting.exposure: 1.0, Setting.clarity: 20});
+      final first = await develop(dev, src, s1);
+      final second = await develop(dev, src, s2);
+      final fresh = await ShaderDeveloper.load();
+      try {
+        expect(second, await develop(fresh, src, s2));
+      } finally {
+        fresh.dispose();
+        src.dispose();
+      }
+      var brighter = 0;
+      for (var i = 0; i < first.length; i += 4) {
+        if (second[i + 1] > first[i + 1]) brighter++;
+      }
+      expect(brighter, greaterThan(first.length ~/ 4 ~/ 2));
+    });
+  });
+
+  testWidgets('changing only Radius re-blurs only the sharpening copy', (
+    t,
+  ) async {
+    await withDev(t, () async {
+      final src = await image(richRgba(2));
+      Map<Setting, double> v(double radius) => {
+        Setting.clarity: 30,
+        Setting.texture: 30,
+        Setting.noiseLuminance: 30,
+        Setting.sharpenAmount: 50,
+        Setting.sharpenRadius: radius,
+      };
+      await develop(dev, src, edit(v(1)));
+      expect(dev.debugBlursMade, 4);
+      await develop(dev, src, edit(v(2)));
+      expect(dev.debugBlursMade, 5);
+      await develop(dev, src, edit({...v(2), Setting.clarity: 60}));
+      expect(dev.debugBlursMade, 5);
+      dev.clearCache();
+      await develop(dev, src, edit(v(2)));
+      expect(dev.debugBlursMade, 9);
+      src.dispose();
     });
   });
 }

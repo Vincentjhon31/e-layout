@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'color_pipeline.dart';
 import 'lut.dart';
 import 'photo_developer.dart';
@@ -39,10 +41,6 @@ import 'settings.dart';
 //   28           uGrainRough   Roughness/100
 // Samplers: 0 uSrc, 1 uBlurNrLum, 2 uBlurNrCol, 3 uBlurSharp, 4 uBlurTex,
 // 5 uBlurClar, 6 uLut. An unused blur is bound to the source.
-
-/// Long edge, in full-resolution pixels, that [ShaderDeveloper.margin]
-/// assumes when it is not given the photo's size.
-const double kAssumedLongEdge = 8000;
 
 /// The blurred copies the shader reads.
 enum _Blur { nrLum, nrCol, sharp, tex, clar }
@@ -167,6 +165,10 @@ class _Plan {
   late final double vigAmount, vigStart, vigWidth, vigMix, vigPower, vigHigh;
   late final double grainAmt, grainCell, grainRough;
 
+  /// True when any blur, the vignette or the grain is in use: the source
+  /// cannot be returned as it is.
+  bool get hasEffects => sigmas.isNotEmpty || vigAmount != 0 || grainAmt > 0;
+
   /// 3 sigma of the widest blur in use, plus 2 px for rounding and
   /// sampling; 0 when no blur is used (vignette and grain are positional).
   int get margin {
@@ -178,17 +180,31 @@ class _Plan {
   }
 }
 
-/// The blurred copies of one source image at one scale and sharpen radius.
+/// The blurred copies of one source image at one scale and photo size.
+/// Each copy is keyed by its kind and sigma; only the sharpening blur's
+/// sigma changes within a set (with Radius), and only its last one is kept.
 class _BlurSet {
-  _BlurSet(this.src, this.scale, this.radius, this.long);
+  _BlurSet(this.src, this.scale, this.long);
 
   final ui.Image src;
-  final double scale, radius, long;
-  final Map<_Blur, ui.Image> images = {};
+  final double scale, long;
+  final Map<(_Blur, double), ui.Image> images = {};
   bool evicted = false;
 
-  bool matches(ui.Image s, double sc, double r, double l) =>
-      identical(src, s) && scale == sc && radius == r && long == l;
+  bool matches(ui.Image s, double sc, double l) =>
+      identical(src, s) && scale == sc && long == l;
+
+  /// Stores [img] for ([kind], [sigma]), dropping an older sharpening blur.
+  void put(_Blur kind, double sigma, ui.Image img) {
+    if (kind == _Blur.sharp) {
+      images.removeWhere((k, v) {
+        if (k.$1 != _Blur.sharp) return false;
+        v.dispose();
+        return true;
+      });
+    }
+    images[(kind, sigma)] = img;
+  }
 
   void dispose() {
     evicted = true;
@@ -211,9 +227,13 @@ class ShaderDeveloper implements PhotoDeveloper {
 
   final ui.FragmentProgram _program;
 
-  // Blurred inputs per (image identity, scale, sharpen radius, photo size),
-  // the last two entries, newest last.
+  // Blurred inputs per (image identity, scale, photo size), the last two
+  // entries, newest last. The sharpening blur is also keyed by its sigma.
   final List<_BlurSet> _blurSets = [];
+
+  /// How many blurred copies this developer has made, for tests.
+  @visibleForTesting
+  int debugBlursMade = 0;
 
   // The last colour table, keyed by the global settings, profile and size.
   ui.Image? _lut;
@@ -221,10 +241,9 @@ class ShaderDeveloper implements PhotoDeveloper {
   ProfileTable? _lutProfile;
 
   @override
-  int margin(EditSettings s, double scale, {ui.Size? fullSize}) {
-    final full =
-        fullSize ?? ui.Size(kAssumedLongEdge * scale, kAssumedLongEdge * scale);
-    return _Plan(s, scale, full).margin;
+  int margin(EditSettings s, double scale, {required ui.Size fullSize}) {
+    assert(scale > 0);
+    return _Plan(s, scale, fullSize).margin;
   }
 
   @override
@@ -238,11 +257,15 @@ class ShaderDeveloper implements PhotoDeveloper {
     int lutSize = 33,
     DevelopStats? stats,
   }) async {
-    if (s.isNeutral) return copyImage(src);
+    assert(scale > 0);
+    assert(lutSize >= 2);
     final w = src.width, h = src.height;
     final full = fullSize ?? ui.Size(w.toDouble(), h.toDouble());
     final plan = _Plan(s, scale, full);
     final pipeline = ColorPipeline(s, profile: profile);
+    // A profile table acts even on neutral settings, so test the pipeline,
+    // not EditSettings.isNeutral.
+    if (pipeline.isIdentity && !plan.hasEffects) return copyImage(src);
 
     var air = 1.0;
     if (plan.dehaze != 0) air = (stats ?? await _measure(src)).airlight;
@@ -251,12 +274,7 @@ class ShaderDeveloper implements PhotoDeveloper {
     final blurs = <_Blur, ui.Image>{};
     ui.Image? lut;
     try {
-      final set = _blurSetFor(
-        src,
-        scale,
-        s[Setting.sharpenRadius],
-        math.max(full.width, full.height),
-      );
+      final set = _blurSetFor(src, scale, math.max(full.width, full.height));
       for (final e in plan.sigmas.entries) {
         blurs[e.key] = await _blur(set, e.key, e.value);
       }
@@ -297,13 +315,19 @@ class ShaderDeveloper implements PhotoDeveloper {
         f(plan.grainAmt);
         f(plan.grainCell);
         f(plan.grainRough);
-        sh.setImageSampler(0, src);
-        sh.setImageSampler(1, blurs[_Blur.nrLum] ?? src);
-        sh.setImageSampler(2, blurs[_Blur.nrCol] ?? src);
-        sh.setImageSampler(3, blurs[_Blur.sharp] ?? src);
-        sh.setImageSampler(4, blurs[_Blur.tex] ?? src);
-        sh.setImageSampler(5, blurs[_Blur.clar] ?? src);
-        sh.setImageSampler(6, lut ?? src);
+        // Every read is at a texel centre: no filtering.
+        void sampler(int index, ui.Image img) => sh.setImageSampler(
+          index,
+          img,
+          filterQuality: ui.FilterQuality.none,
+        );
+        sampler(0, src);
+        sampler(1, blurs[_Blur.nrLum] ?? src);
+        sampler(2, blurs[_Blur.nrCol] ?? src);
+        sampler(3, blurs[_Blur.sharp] ?? src);
+        sampler(4, blurs[_Blur.tex] ?? src);
+        sampler(5, blurs[_Blur.clar] ?? src);
+        sampler(6, lut ?? src);
         return await recordImage(
           w,
           h,
@@ -324,11 +348,16 @@ class ShaderDeveloper implements PhotoDeveloper {
   }
 
   @override
-  void dispose() {
+  void clearCache() {
     for (final b in _blurSets) {
       b.dispose();
     }
     _blurSets.clear();
+  }
+
+  @override
+  void dispose() {
+    clearCache();
     _lut?.dispose();
     _lut = null;
     _lutKey = null;
@@ -352,16 +381,16 @@ class ShaderDeveloper implements PhotoDeveloper {
     }
   }
 
-  _BlurSet _blurSetFor(ui.Image src, double scale, double radius, double long) {
+  _BlurSet _blurSetFor(ui.Image src, double scale, double long) {
     for (final b in _blurSets) {
-      if (b.matches(src, scale, radius, long)) {
+      if (b.matches(src, scale, long)) {
         _blurSets
           ..remove(b)
           ..add(b);
         return b;
       }
     }
-    final b = _BlurSet(src, scale, radius, long);
+    final b = _BlurSet(src, scale, long);
     _blurSets.add(b);
     while (_blurSets.length > 2) {
       _blurSets.removeAt(0).dispose();
@@ -372,16 +401,17 @@ class ShaderDeveloper implements PhotoDeveloper {
   /// A handle the caller disposes: a clone of the cached blur, or the blur
   /// itself when its set was evicted while it was being made.
   Future<ui.Image> _blur(_BlurSet set, _Blur kind, double sigma) async {
-    final cached = set.images[kind];
+    final cached = set.images[(kind, sigma)];
     if (cached != null) return cached.clone();
     final img = await blurImage(set.src, sigma);
+    debugBlursMade++;
     if (set.evicted) return img;
-    final again = set.images[kind];
+    final again = set.images[(kind, sigma)];
     if (again != null) {
       img.dispose();
       return again.clone();
     }
-    set.images[kind] = img;
+    set.put(kind, sigma, img);
     return img.clone();
   }
 

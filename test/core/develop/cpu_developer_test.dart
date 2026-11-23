@@ -45,7 +45,7 @@ void main() {
         }
       }
       expect(mismatches, 0);
-      expect(dev.margin(s, 1), 0);
+      expect(dev.margin(s, 1, fullSize: const ui.Size(256, 256)), 0);
       expect(dev.margin(s, 4, fullSize: const ui.Size(100, 100)), 0);
     });
   });
