@@ -20,6 +20,8 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../develop/profile_table.dart';
 
 const _message = "This colour table can't be read.";
@@ -71,7 +73,13 @@ ProfileTable decodeAdobeTable(String encoded, {String? fingerprint}) {
       throw const FormatException(_message);
     }
     table = _parse(payload);
-  } catch (_) {
+  } on Exception {
+    // FormatException (ours and package:archive's) and other exceptions.
+    throw const FormatException(_message);
+  } on ArgumentError {
+    // Includes RangeError (a read or write past the end of a buffer).
+    throw const FormatException(_message);
+  } on StateError {
     throw const FormatException(_message);
   }
   return table.toProfileTable();
@@ -96,6 +104,9 @@ Uint8List _textToBytes(String s) {
     value += d * scale;
     scale *= 85;
     if (++phase == 5) {
+      // Five digits can exceed 2^32 (85^5 > 2^32); Adobe keeps the value in
+      // a uint32, so it wraps. Storing into a Uint8List keeps only the low
+      // 8 bits of each shifted value, which gives the same 4 bytes.
       out[o++] = value;
       out[o++] = value >> 8;
       out[o++] = value >> 16;
@@ -206,6 +217,8 @@ _AdobeTable _parse(Uint8List payload) {
       maxAmount < 1) {
     throw bad;
   }
+  // An optional uint32 of flags may follow, and Adobe ignores any further
+  // bytes; neither changes the colours, so the rest is not read.
   return _AdobeTable(dimensions, divisions, samples, primaries, gamma, gamut);
 }
 
@@ -437,11 +450,22 @@ class _ToeGamma {
   }
 }
 
+// Constants as in DNG SDK 1.7.1 dng_color_space.cpp (lines 63-69 for 1.8,
+// 119-125 for 2.2): x1 = 2 * 32^(1/(1/gamma - 1)), y1 = x1^(1/gamma),
+// slope1 = (1/gamma) * x1^(1/gamma - 1).
 const _toe18 = _ToeGamma(1.8, 8.2118790552e-4, 0.019310851, 13.064306598);
 const _toe22 = _ToeGamma(2.2, 0.0034800731, 0.0763027458, 9.9661890075);
 
 // Rec. 709 / 2020 curve.
 const _recAlpha = 1.0992968268094429, _recBeta = 0.0180539685108078;
+
+/// The table gamma curve [gamma] (a header code), linear 0..1 to encoded.
+@visibleForTesting
+double adobeGammaEncode(int gamma, double x) => _encode(gamma, x);
+
+/// The inverse of [adobeGammaEncode].
+@visibleForTesting
+double adobeGammaDecode(int gamma, double y) => _decode(gamma, y);
 
 double _encode(int gamma, double x) => switch (gamma) {
   _gammaLinear => x,

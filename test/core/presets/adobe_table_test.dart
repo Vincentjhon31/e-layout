@@ -198,6 +198,59 @@ void main() {
     expect(b2, closeTo(1, 0.002));
   });
 
+  group('gamma curves match the DNG SDK near black', () {
+    // DNG SDK 1.7.1 dng_spline.h lines 41-46, EvaluateSplineSegment, written
+    // out here as the SDK has it (B and C form), independent of the decoder.
+    double sdkSegment(
+      double x,
+      double x0,
+      double y0,
+      double s0,
+      double x1,
+      double y1,
+      double s1,
+    ) {
+      final a = x1 - x0, b = (x - x0) / a, c = (x1 - x) / a;
+      return ((y0 * (2.0 - c + b) + (s0 * a * b)) * (c * c)) +
+          ((y1 * (2.0 - b + c) - (s1 * a * c)) * (b * b));
+    }
+
+    test('sRGB', () {
+      // dng_color_space.cpp lines 24-28: x <= 0.0031308 ? x * 12.92
+      // : 1.055 * pow (x, 1/2.4) - 0.055.
+      expect(adobeGammaEncode(gammaSrgb, 0.002), closeTo(0.02584, 1e-12));
+      // 1.055 * 0.005^(1/2.4) - 0.055, by hand: 0.061002.
+      expect(adobeGammaEncode(gammaSrgb, 0.005), closeTo(0.061002, 1e-5));
+      expect(adobeGammaDecode(gammaSrgb, 0.02584), closeTo(0.002, 1e-12));
+    });
+
+    test('gamma 1.8', () {
+      // dng_color_space.cpp lines 63-69 (constants) and 71-78 (the toe is
+      // EvaluateSplineSegment (x, 0, 0, slope0, x1, y1, slope1) for x <= x1).
+      const x1 = 8.2118790552e-4, y1 = 0.019310851, slope1 = 13.064306598;
+      // At x = x1 / 2: 4*x1 + y1/2 - slope1*x1/8, by hand: 0.01159915.
+      final want = sdkSegment(x1 / 2, 0, 0, 32, x1, y1, slope1);
+      expect(want, closeTo(0.01159915, 1e-7));
+      expect(adobeGammaEncode(gamma18, x1 / 2), closeTo(want, 1e-12));
+      expect(adobeGammaDecode(gamma18, want), closeTo(x1 / 2, 1e-12));
+      // Joins the power part and has slope 32 at black.
+      expect(adobeGammaEncode(gamma18, x1), closeTo(y1, 1e-8));
+      expect(adobeGammaEncode(gamma18, 1e-8) / 1e-8, closeTo(32, 0.01));
+    });
+
+    test('gamma 2.2', () {
+      // dng_color_space.cpp lines 119-125 (constants) and 127-134 (toe).
+      const x1 = 0.0034800731, y1 = 0.0763027458, slope1 = 9.9661890075;
+      // At x = x1 / 2, by hand: 0.04773628.
+      final want = sdkSegment(x1 / 2, 0, 0, 32, x1, y1, slope1);
+      expect(want, closeTo(0.04773628, 1e-7));
+      expect(adobeGammaEncode(gamma22, x1 / 2), closeTo(want, 1e-12));
+      expect(adobeGammaDecode(gamma22, want), closeTo(x1 / 2, 1e-12));
+      expect(adobeGammaEncode(gamma22, x1), closeTo(y1, 1e-8));
+      expect(adobeGammaEncode(gamma22, 1e-8) / 1e-8, closeTo(32, 0.01));
+    });
+  });
+
   group('bad input throws a FormatException', () {
     test('empty text', () {
       expect(() => decodeAdobeTable(''), _unreadable);
@@ -274,6 +327,30 @@ void main() {
       ]) {
         expect(() => decodeAdobeTable(encodeAdobeBinary(p)), _unreadable);
       }
+    });
+
+    test('a 1D table with fewer than 2 or more than 4096 divisions', () {
+      for (final n in [0, 1, 4097]) {
+        final p = identityPayload(dimensions: 1, divisions: n);
+        expect(() => decodeAdobeTable(encodeAdobeBinary(p)), _unreadable);
+      }
+    });
+
+    test('a 4096-division 1D table cut short', () {
+      final p = identityPayload(dimensions: 1, divisions: 4096);
+      // The whole table is valid (the largest 1D size).
+      expect(decodeAdobeTable(encodeAdobeBinary(p)).size, 33);
+      // Cut inside the samples, and inside the trailing amounts.
+      for (final cut in [p.length ~/ 2, p.length - 5]) {
+        final short = Uint8List.sublistView(p, 0, cut);
+        expect(() => decodeAdobeTable(encodeAdobeBinary(short)), _unreadable);
+      }
+      // Cut in the text.
+      final text = encodeAdobeBinary(p);
+      expect(
+        () => decodeAdobeTable(text.substring(0, text.length - 20)),
+        _unreadable,
+      );
     });
 
     test('a payload cut short', () {
