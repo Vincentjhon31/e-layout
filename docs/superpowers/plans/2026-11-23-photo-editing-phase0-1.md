@@ -744,3 +744,25 @@ etest('Done returns to Home and the grid cell shows the edit', ...);
 ## Handoff notes
 
 - 2026-11-23: plan written after the owner approved the design. Not started. The owner also asked for an image converter ("jpg to png, png to jpeg, and more"). It is being designed separately and is **not** part of this plan.
+- **2026-11-24: Phases 0 and 1 DONE** on branch `feature/photo-editing` (40 commits after `e-Layout 1.0.1` = 7cfdb92, ending 702b536).
+  - Every task got its own review, then a whole-branch review on the most capable model and one fix wave.
+  - Not pushed, tagged or merged; the owner decides.
+  - Version 1.1.0+3 with its what's-new. Local builds: `dist/e-layout-1.1.0-local.apk` (57.2 MB), Windows release build, web build (`--base-href /app/`).
+  - Tests, run in pieces because of memory: core 252, develop 85, home/viewer/offline 54, ui/online/platform 57, about/fonts/layouts all pass.
+  - Manual check: with the real sample pack (outside the repo), import gives `Imported "Presetpro - Vintage Vibe". Imported the profile "Presetpro - Vintage Vibe".` Preset for all, a single-photo change, copy to all, save, and the batch and edits coming back after a restart all worked through HomeController on real file stores.
+  - Notes written: `docs/superpowers/notes/lightcraft-notes.md`, `develop-spike.md`, `lightroom-study.md` (REA study **not done**: no phone).
+- **Owner to-dos before release:**
+  1. Re-run `flutter test test/features/editor/panels_test.dart` on an idle machine. "goldens 2 picture tools" timed out here: it waits for real file saves while memory was low. This branch didn't change layout-editor code, but this wasn't confirmed on main.
+  2. Plug in an Android phone, then measure slider speed and the 24 MP save time. The spike estimates the save may be about twice the 4 s target. Run the Lightroom Mobile REA study (Task 2).
+  3. Try the editor by hand on Windows and the website. Here it was only built, launched and screenshotted.
+- **Known simplifications (Phase 4 tuning):**
+  - Highlights and Shadows are global, not local.
+  - Several local effects are simplified compared with LightCraft.
+  - Positive Blacks lifts the black point with a constant chosen here.
+- **Parked minors:** see the final ledger summary in the session.
+  - Viewer: dispose during a develop in flight; a stale developed image when a develop fails.
+  - Picker: swipe labels; an old sharedName without an id shows no check.
+  - Imports run on the UI isolate.
+  - Orphan bytes are left after a kill (Clear reclaims them).
+  - Lossy fileSafe ids.
+- **Next:** Phase 2 (crop), Phase 3 (RAW with LibRaw), Phase 4 (matching Lightroom). Each needs its own plan. The converter request is still waiting for the owner's answer about what it's for.
