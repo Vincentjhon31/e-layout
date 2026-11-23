@@ -10,6 +10,7 @@ import '../../ui/previews.dart';
 import '../../ui/widgets/app_button.dart';
 import '../../ui/widgets/pressable.dart';
 import '../../ui/widgets/toast.dart';
+import '../develop/open_photo_editor.dart';
 import '../home/home_controller.dart';
 
 /// Long edge of the copy decoded for the viewer.
@@ -165,27 +166,46 @@ class _PhotoViewerState extends State<PhotoViewer> {
                             textAlign: TextAlign.center,
                             style: AppText.subhead.copyWith(color: dim, fontFeatures: AppText.tabular)),
                         const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: AppButton(
-                                label: _busy ? 'Working' : 'Save this photo',
-                                onPressed: _busy || layout == null ? null : () => _run(() => c.saveOne(photo)),
-                              ),
-                            ),
-                            if (c.sharer.buttonLabel != null) const SizedBox(width: 10),
-                            if (c.sharer.buttonLabel != null)
-                            _ShareButton(
-                              label: c.sharer.buttonLabel!,
-                              icon: c.sharer.needsCopies ? CupertinoIcons.share : CupertinoIcons.folder,
-                              onPressed: _busy || layout == null
-                                  ? null
-                                  : () => _run(() async {
-                                        await c.shareOne(photo);
-                                        return null;
-                                      }),
-                            ),
-                          ],
+                        LayoutBuilder(
+                          // With Edit on a phone, Edit and Share stack their words under the icon
+                          // so "Save this photo" keeps its whole label.
+                          builder: (context, box) {
+                            final compact = c.editingAvailable && box.maxWidth < 480;
+                            final gap = SizedBox(width: compact ? 8 : 10);
+                            return Row(
+                              children: [
+                                Expanded(
+                                  child: AppButton(
+                                    label: _busy ? 'Working' : 'Save this photo',
+                                    onPressed: _busy || layout == null ? null : () => _run(() => c.saveOne(photo)),
+                                  ),
+                                ),
+                                if (c.editingAvailable) ...[
+                                  gap,
+                                  _ShareButton(
+                                    label: 'Edit',
+                                    icon: CupertinoIcons.slider_horizontal_3,
+                                    compact: compact,
+                                    onPressed: _busy ? null : () => openPhotoEditor(context, c, photo, replace: true),
+                                  ),
+                                ],
+                                if (c.sharer.buttonLabel != null) ...[
+                                  gap,
+                                  _ShareButton(
+                                    label: c.sharer.buttonLabel!,
+                                    icon: c.sharer.needsCopies ? CupertinoIcons.share : CupertinoIcons.folder,
+                                    compact: compact,
+                                    onPressed: _busy || layout == null
+                                        ? null
+                                        : () => _run(() async {
+                                              await c.shareOne(photo);
+                                              return null;
+                                            }),
+                                  ),
+                                ],
+                              ],
+                            );
+                          },
                         ),
                       ],
                     ),
@@ -200,13 +220,17 @@ class _PhotoViewerState extends State<PhotoViewer> {
 }
 
 class _ShareButton extends StatelessWidget {
-  const _ShareButton({required this.label, required this.icon, this.onPressed});
+  const _ShareButton({required this.label, required this.icon, this.onPressed, this.compact = false});
   final String label;
   final IconData icon;
   final VoidCallback? onPressed;
 
+  /// The label under the icon, in a 60 pt wide button.
+  final bool compact;
+
   @override
   Widget build(BuildContext context) {
+    const white = Color(0xFFFFFFFF);
     return Opacity(
       opacity: onPressed == null ? 0.4 : 1,
       child: Pressable(
@@ -214,19 +238,32 @@ class _ShareButton extends StatelessWidget {
         semanticLabel: label,
         child: Container(
           height: AppMetrics.buttonHeight,
-          padding: const EdgeInsets.symmetric(horizontal: 18),
+          width: compact ? 60 : null,
+          padding: EdgeInsets.symmetric(horizontal: compact ? 4 : 18),
           decoration: BoxDecoration(
             color: const Color(0x33FFFFFF),
             borderRadius: BorderRadius.circular(AppMetrics.buttonRadius),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 20, color: const Color(0xFFFFFFFF)),
-              const SizedBox(width: 8),
-              Text(label, style: AppText.button.copyWith(color: const Color(0xFFFFFFFF))),
-            ],
-          ),
+          child: compact
+              ? Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(icon, size: 20, color: white),
+                    const SizedBox(height: 2),
+                    Text(label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.captionStrong.copyWith(color: white, height: 1.1)),
+                  ],
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 20, color: white),
+                    const SizedBox(width: 8),
+                    Text(label, style: AppText.button.copyWith(color: white)),
+                  ],
+                ),
         ),
       ),
     );
