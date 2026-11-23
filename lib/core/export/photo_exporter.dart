@@ -7,6 +7,9 @@ import 'package:image/image.dart' as img;
 
 import '../codec/jpeg_encoder.dart';
 import '../codec/png_encoder.dart';
+import '../develop/photo_developer.dart';
+import '../develop/profile_table.dart';
+import '../develop/settings.dart';
 import '../model/layout_doc.dart';
 import '../render/layout_painter.dart';
 import '../render/layout_prep.dart';
@@ -70,14 +73,25 @@ Uint8List _encode(_EncodeJob j) => j.format == OutputFormat.jpeg
 /// Renders one photo with the layout on top at the photo's full pixel size, in
 /// tiles so that a photo larger than the GPU's maximum texture is never shrunk.
 class PhotoExporter {
-  PhotoExporter({this.tileSize = 2048, @visibleForTesting this.forcePixelPath = false});
+  PhotoExporter(
+      {this.tileSize = 2048, @visibleForTesting this.forcePixelPath = false, this.developer});
   final int tileSize;
 
   /// Test hook: always take the route used when the engine clamps big pictures.
   final bool forcePixelPath;
 
+  /// Applies photo edits; null when editing is not available here.
+  final PhotoDeveloper? developer;
+
+  /// Renders [photoBytes] with the layout on top. With [edit] (and not
+  /// neutral), each tile is cut from the upright photo with the developer's
+  /// margin on every side, developed in whole-photo coordinates, cropped back
+  /// and the layout drawn on top. Null or neutral edits give today's bytes.
   Future<RenderedPhoto> render(Uint8List photoBytes, LayoutDoc? doc, LayoutPrep? prep,
-      ExportSettings settings) async {
+      ExportSettings settings, {EditSettings? edit, ProfileTable? profile}) async {
+    final e = edit == null || edit.isNeutral ? null : edit;
+    final dev = developer;
+    if (e != null && dev == null) throw StateError('Photo editing is not available.');
     final jpeg = settings.format == OutputFormat.jpeg;
     ui.Image? src;
     img.Image? pixels; // set when the engine could not decode at full size
@@ -120,6 +134,13 @@ class PhotoExporter {
     final g = photoGeometry(pw, ph, doc);
     final out = Uint8List(g.w * g.h * 4);
     try {
+      // Edits are computed on the whole upright photo: scale 1, its full size,
+      // and whole-photo values measured once on a small copy.
+      final fullSize = ui.Size(pw.toDouble(), ph.toDouble());
+      final margin = e == null ? 0 : dev!.margin(e, 1, fullSize: fullSize);
+      final stats = e != null && e[Setting.dehaze] != 0
+          ? await _measure(src, pixels)
+          : null;
       for (var ty = 0; ty < g.h; ty += tileSize) {
         for (var tx = 0; tx < g.w; tx += tileSize) {
           final tw = math.min(tileSize, g.w - tx);
@@ -127,7 +148,37 @@ class PhotoExporter {
           final rec = ui.PictureRecorder();
           final canvas = ui.Canvas(rec);
           ui.Image? tileSrc;
-          if (src != null) {
+          if (e != null) {
+            // The tile in the upright photo, with the margin, inside the photo.
+            final px = g.cropX + tx, py = g.cropY + ty;
+            final x0 = math.max(px - margin, 0), y0 = math.max(py - margin, 0);
+            final x1 = math.min(px + tw + margin, pw), y1 = math.min(py + th + margin, ph);
+            final cut = src != null
+                ? await _cutImage(src, x0, y0, x1 - x0, y1 - y0)
+                : await _tileImage(fullBytes!, pw * 4, x0, y0, x1 - x0, y1 - y0);
+            try {
+              tileSrc = await dev!.develop(cut, e,
+                  profile: profile,
+                  origin: ui.Offset(x0.toDouble(), y0.toDouble()),
+                  fullSize: fullSize,
+                  stats: stats);
+            } finally {
+              cut.dispose();
+              // Tiles never share blurs; free them before the next one.
+              dev!.clearCache();
+            }
+            if (jpeg) {
+              canvas.drawRect(ui.Rect.fromLTWH(0, 0, tw.toDouble(), th.toDouble()),
+                  ui.Paint()..color = const ui.Color(0xFFFFFFFF));
+            }
+            canvas.drawImage(
+                tileSrc, ui.Offset((x0 - px).toDouble(), (y0 - py).toDouble()), ui.Paint());
+            if (doc != null) {
+              canvas.translate(-tx.toDouble(), -ty.toDouble());
+              canvas.scale(g.s, g.s);
+              drawLayout(canvas, doc, prep, g.frameH);
+            }
+          } else if (src != null) {
             canvas.translate(-tx.toDouble(), -ty.toDouble());
             if (jpeg) {
               // transparent photos would otherwise turn black
@@ -165,10 +216,42 @@ class PhotoExporter {
       }
     } finally {
       src?.dispose();
+      if (e != null) dev!.clearCache();
     }
 
     final bytes = await compute(_encode, _EncodeJob(out, g.w, g.h, settings.format, settings.quality));
     return RenderedPhoto(bytes, g.w, g.h, jpeg ? 'jpg' : 'png');
+  }
+
+  /// A 1:1 copy of the region (x, y, w, h) of [src].
+  Future<ui.Image> _cutImage(ui.Image src, int x, int y, int w, int h) => recordImage(
+      w,
+      h,
+      (c) => c.drawImageRect(
+          src,
+          ui.Rect.fromLTWH(x.toDouble(), y.toDouble(), w.toDouble(), h.toDouble()),
+          ui.Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+          ui.Paint()));
+
+  /// Whole-photo values, measured on a copy of about 512 px on the long edge
+  /// of the upright photo ([src], or [pixels] on the pixel path).
+  Future<DevelopStats> _measure(ui.Image? src, img.Image? pixels) async {
+    final w = src?.width ?? pixels!.width, h = src?.height ?? pixels!.height;
+    final k = math.min(512 / math.max(w, h), 1.0);
+    final sw = math.max((w * k).round(), 1), sh = math.max((h * k).round(), 1);
+    final ui.Image small;
+    if (src != null) {
+      small = await scaleImage(src, sw, sh);
+    } else {
+      final resized = img.copyResize(pixels!,
+          width: sw, height: sh, interpolation: img.Interpolation.average);
+      small = await imageFromRgba(resized.getBytes(order: img.ChannelOrder.rgba), sw, sh);
+    }
+    try {
+      return await measureStats(small);
+    } finally {
+      small.dispose();
+    }
   }
 
   Future<ui.Image> _tileImage(
