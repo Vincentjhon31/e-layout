@@ -14,6 +14,7 @@ import 'crs_map.dart';
 import 'dng_xmp.dart';
 import 'lrtemplate_preset.dart';
 import 'preset.dart';
+import 'preset_codec.dart';
 import 'xmp_preset.dart';
 
 class _Found {
@@ -59,12 +60,15 @@ const _maxTotal = 256 * _mb;
 class _Budget {
   bool tooBig = false;
   int total = 0;
+
+  /// e-Layout share files found (`.json`).
+  final shared = <(Preset, Profile?)>[];
 }
 
 int _cap(String lower, {bool inZip = false}) =>
     lower.endsWith('.dng') ? (inZip ? _maxDngInZip : _maxDng) : _maxText;
 
-const _readable = ['.xmp', '.dng', '.lrtemplate', '.zip'];
+const _readable = ['.xmp', '.dng', '.lrtemplate', '.json', '.zip'];
 
 class _EntryTooBig implements Exception {
   const _EntryTooBig();
@@ -141,12 +145,19 @@ void _read(
     final isXmp = lower.endsWith('.xmp');
     final isDng = lower.endsWith('.dng');
     final isTemplate = lower.endsWith('.lrtemplate');
-    if (!isXmp && !isDng && !isTemplate) return;
+    final isJson = lower.endsWith('.json');
+    if (!isXmp && !isDng && !isTemplate && !isJson) return;
     if (bytes.length > _cap(lower)) {
       budget.tooBig = true;
       return;
     }
-    if (isXmp) {
+    if (isJson) {
+      try {
+        budget.shared.add(decodePresetFile(bytes));
+      } on FormatException {
+        // Some other .json file: skipped silently.
+      }
+    } else if (isXmp) {
       final p = parseXmp(utf8.decode(bytes, allowMalformed: true));
       if (p != null && (p.isLook || isTrue(p.fields['HasSettings']))) {
         out.add(_Found(base, p));
@@ -251,6 +262,14 @@ ImportResult importPresetFiles(
     }
   }
 
+  final sharedKeys = <String>{};
+  for (final (_, pf) in budget.shared) {
+    if (pf != null && !profiles.containsKey(_key(pf.id))) {
+      profiles[_key(pf.id)] = pf;
+      sharedKeys.add(_key(pf.id));
+    }
+  }
+
   final candidates = [...profiles.values, ...known.values];
   Profile? find(LookInfo l) {
     if (l.id.isNotEmpty) {
@@ -335,6 +354,20 @@ ImportResult importPresetFiles(
     );
   }
 
+  // A share file's preset keeps its own id, so importing it again replaces it.
+  for (final (sp, _) in budget.shared) {
+    if (!seen.add(_key(sp.id))) continue;
+    presets.add(
+      Preset(
+        id: sp.id,
+        name: sp.name,
+        kind: PresetKind.imported,
+        created: now,
+        patch: sp.patch,
+      ),
+    );
+  }
+
   const order = [
     'masks',
     'lens corrections',
@@ -345,6 +378,11 @@ ImportResult importPresetFiles(
     'crop',
   ];
   final profileList = profiles.values.toList();
+  // Profiles that came inside a share file are not counted in the sentence.
+  final counted = [
+    for (final p in profileList)
+      if (!sharedKeys.contains(_key(p.id))) p,
+  ];
   final b = StringBuffer();
   if (presets.isEmpty && profileList.isEmpty) {
     if (unreadable.isEmpty) {
@@ -359,10 +397,10 @@ ImportResult importPresetFiles(
     } else if (presets.length > 1) {
       parts.add('Imported ${presets.length} presets.');
     }
-    if (profileList.length == 1) {
-      parts.add('Imported the profile "${profileList.single.name}".');
-    } else if (profileList.length > 1) {
-      parts.add('Imported ${profileList.length} profiles.');
+    if (counted.length == 1) {
+      parts.add('Imported the profile "${counted.single.name}".');
+    } else if (counted.length > 1) {
+      parts.add('Imported ${counted.length} profiles.');
     }
     b.write(parts.join(' '));
     final list = [
