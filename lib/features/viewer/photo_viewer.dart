@@ -24,8 +24,9 @@ Future<ui.Image> decodeScaled(Uint8List bytes, int edge) async {
     try {
       final s = math.min(1.0, edge / math.max(desc.width, desc.height));
       final codec = await desc.instantiateCodec(
-          targetWidth: math.max(1, (desc.width * s).round()),
-          targetHeight: math.max(1, (desc.height * s).round()));
+        targetWidth: math.max(1, (desc.width * s).round()),
+        targetHeight: math.max(1, (desc.height * s).round()),
+      );
       final frame = await codec.getNextFrame();
       codec.dispose();
       return frame.image;
@@ -39,7 +40,11 @@ Future<ui.Image> decodeScaled(Uint8List bytes, int edge) async {
 
 /// Full-screen photo with its layout; swipe between photos, pinch to zoom.
 class PhotoViewer extends StatefulWidget {
-  const PhotoViewer({super.key, required this.controller, required this.initialIndex});
+  const PhotoViewer({
+    super.key,
+    required this.controller,
+    required this.initialIndex,
+  });
 
   final HomeController controller;
   final int initialIndex;
@@ -50,7 +55,9 @@ class PhotoViewer extends StatefulWidget {
 
 class _PhotoViewerState extends State<PhotoViewer> {
   late final List<PhotoItem> _photos = widget.controller.readyPhotos;
-  late final PageController _pages = PageController(initialPage: widget.initialIndex);
+  late final PageController _pages = PageController(
+    initialPage: widget.initialIndex,
+  );
   late int _index = widget.initialIndex;
   bool _bars = true;
   bool _zoomed = false;
@@ -67,7 +74,9 @@ class _PhotoViewerState extends State<PhotoViewer> {
     setState(() => _busy = true);
     try {
       final msg = await job();
-      if (msg != null && mounted) showToast(context, msg, icon: CupertinoIcons.checkmark_alt);
+      if (msg != null && mounted) {
+        showToast(context, msg, icon: CupertinoIcons.checkmark_alt);
+      }
     } catch (e) {
       if (mounted) showToast(context, "Couldn't save this photo: $e");
     } finally {
@@ -90,7 +99,9 @@ class _PhotoViewerState extends State<PhotoViewer> {
           Positioned.fill(
             child: PageView.builder(
               controller: _pages,
-              physics: _zoomed ? const NeverScrollableScrollPhysics() : const PageScrollPhysics(),
+              physics: _zoomed
+                  ? const NeverScrollableScrollPhysics()
+                  : const PageScrollPhysics(),
               itemCount: _photos.length,
               onPageChanged: (i) => setState(() {
                 _index = i;
@@ -99,6 +110,7 @@ class _PhotoViewerState extends State<PhotoViewer> {
               itemBuilder: (context, i) => _ViewerPage(
                 key: ValueKey(_photos[i].id),
                 photo: _photos[i],
+                home: c,
                 layout: layout,
                 onTap: () => setState(() => _bars = !_bars),
                 onZoom: (z) {
@@ -130,12 +142,19 @@ class _PhotoViewerState extends State<PhotoViewer> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Text(photo.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: AppText.headline.copyWith(color: white)),
-                              Text('${_index + 1} of ${_photos.length}',
-                                  style: AppText.caption.copyWith(color: dim, fontFeatures: AppText.tabular)),
+                              Text(
+                                photo.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: AppText.headline.copyWith(color: white),
+                              ),
+                              Text(
+                                '${_index + 1} of ${_photos.length}',
+                                style: AppText.caption.copyWith(
+                                  color: dim,
+                                  fontFeatures: AppText.tabular,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -162,22 +181,32 @@ class _PhotoViewerState extends State<PhotoViewer> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text('Saves as ${c.outputName(photo)}, ${g.w} x ${g.h} px',
-                            textAlign: TextAlign.center,
-                            style: AppText.subhead.copyWith(color: dim, fontFeatures: AppText.tabular)),
+                        Text(
+                          'Saves as ${c.outputName(photo)}, ${g.w} x ${g.h} px',
+                          textAlign: TextAlign.center,
+                          style: AppText.subhead.copyWith(
+                            color: dim,
+                            fontFeatures: AppText.tabular,
+                          ),
+                        ),
                         const SizedBox(height: 12),
                         LayoutBuilder(
                           // With Edit on a phone, Edit and Share stack their words under the icon
                           // so "Save this photo" keeps its whole label.
                           builder: (context, box) {
-                            final compact = c.editingAvailable && box.maxWidth < 480;
+                            final compact =
+                                c.editingAvailable && box.maxWidth < 480;
                             final gap = SizedBox(width: compact ? 8 : 10);
                             return Row(
                               children: [
                                 Expanded(
                                   child: AppButton(
-                                    label: _busy ? 'Working' : 'Save this photo',
-                                    onPressed: _busy || layout == null ? null : () => _run(() => c.saveOne(photo)),
+                                    label: _busy
+                                        ? 'Working'
+                                        : 'Save this photo',
+                                    onPressed: _busy || layout == null
+                                        ? null
+                                        : () => _run(() => c.saveOne(photo)),
                                   ),
                                 ),
                                 if (c.editingAvailable) ...[
@@ -186,21 +215,30 @@ class _PhotoViewerState extends State<PhotoViewer> {
                                     label: 'Edit',
                                     icon: CupertinoIcons.slider_horizontal_3,
                                     compact: compact,
-                                    onPressed: _busy ? null : () => openPhotoEditor(context, c, photo, replace: true),
+                                    onPressed: _busy
+                                        ? null
+                                        : () => openPhotoEditor(
+                                            context,
+                                            c,
+                                            photo,
+                                            replace: true,
+                                          ),
                                   ),
                                 ],
                                 if (c.sharer.buttonLabel != null) ...[
                                   gap,
                                   _ShareButton(
                                     label: c.sharer.buttonLabel!,
-                                    icon: c.sharer.needsCopies ? CupertinoIcons.share : CupertinoIcons.folder,
+                                    icon: c.sharer.needsCopies
+                                        ? CupertinoIcons.share
+                                        : CupertinoIcons.folder,
                                     compact: compact,
                                     onPressed: _busy || layout == null
                                         ? null
                                         : () => _run(() async {
-                                              await c.shareOne(photo);
-                                              return null;
-                                            }),
+                                            await c.shareOne(photo);
+                                            return null;
+                                          }),
                                   ),
                                 ],
                               ],
@@ -220,7 +258,12 @@ class _PhotoViewerState extends State<PhotoViewer> {
 }
 
 class _ShareButton extends StatelessWidget {
-  const _ShareButton({required this.label, required this.icon, this.onPressed, this.compact = false});
+  const _ShareButton({
+    required this.label,
+    required this.icon,
+    this.onPressed,
+    this.compact = false,
+  });
   final String label;
   final IconData icon;
   final VoidCallback? onPressed;
@@ -250,10 +293,15 @@ class _ShareButton extends StatelessWidget {
                   children: [
                     Icon(icon, size: 20, color: white),
                     const SizedBox(height: 2),
-                    Text(label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppText.captionStrong.copyWith(color: white, height: 1.1)),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.captionStrong.copyWith(
+                        color: white,
+                        height: 1.1,
+                      ),
+                    ),
                   ],
                 )
               : Row(
@@ -271,9 +319,17 @@ class _ShareButton extends StatelessWidget {
 }
 
 class _ViewerPage extends StatefulWidget {
-  const _ViewerPage({super.key, required this.photo, required this.layout, required this.onTap, required this.onZoom});
+  const _ViewerPage({
+    super.key,
+    required this.photo,
+    required this.home,
+    required this.layout,
+    required this.onTap,
+    required this.onZoom,
+  });
 
   final PhotoItem photo;
+  final HomeController home;
   final LayoutItem? layout;
   final VoidCallback onTap;
   final ValueChanged<bool> onZoom;
@@ -285,6 +341,12 @@ class _ViewerPage extends StatefulWidget {
 class _ViewerPageState extends State<_ViewerPage> {
   final TransformationController _t = TransformationController();
   ui.Image? _image;
+
+  /// The image with the photo's edits, when it has any and a developer is ready.
+  ui.Image? _developed;
+  String? _developedKey;
+  bool _developing = false;
+  bool _disposed = false;
   bool _failed = false;
   TapDownDetails? _doubleTap;
 
@@ -292,25 +354,89 @@ class _ViewerPageState extends State<_ViewerPage> {
   void initState() {
     super.initState();
     _t.addListener(() => widget.onZoom(_t.value.getMaxScaleOnAxis() > 1.01));
+    widget.home.addListener(_develop);
     _load();
   }
 
   Future<void> _load() async {
     try {
-      final img = await decodeScaled(await photoBytes(widget.photo), kViewerEdge);
+      final img = await decodeScaled(
+        await photoBytes(widget.photo),
+        kViewerEdge,
+      );
       if (!mounted) {
         img.dispose();
         return;
       }
       setState(() => _image = img);
+      _develop();
     } catch (_) {
       if (mounted) setState(() => _failed = true);
     }
   }
 
+  /// Develops the viewer's image with the photo's edits as the editor does.
+  /// Runs one at a time; a look that changed meanwhile runs again.
+  Future<void> _develop() async {
+    final img = _image;
+    final home = widget.home;
+    final photo = widget.photo;
+    final dev = home.developer;
+    if (_disposed || img == null || dev == null || photo.width <= 0) return;
+    final s = home.settingsFor(photo);
+    final profile = home.profileFor(s);
+    final key = s.isNeutral
+        ? null
+        : '${s.key}|${profile == null ? '' : identityHashCode(profile)}';
+    if (key == _developedKey) return;
+    if (_developing) return;
+    if (key == null) {
+      _developed?.dispose();
+      setState(() {
+        _developed = null;
+        _developedKey = null;
+      });
+      return;
+    }
+    _developing = true;
+    ui.Image? out;
+    try {
+      out = await dev.develop(
+        img,
+        s,
+        profile: profile,
+        scale: img.width / photo.width,
+        fullSize: Size(img.width.toDouble(), img.height.toDouble()),
+        lutSize: 33,
+      );
+    } catch (_) {
+      // The undeveloped image stays.
+    } finally {
+      _developing = false;
+    }
+    if (_disposed) {
+      out?.dispose();
+      return;
+    }
+    if (out != null) {
+      final old = _developed;
+      setState(() {
+        _developed = out;
+        _developedKey = key;
+      });
+      old?.dispose();
+    } else {
+      _developedKey = key;
+    }
+    _develop();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
+    widget.home.removeListener(_develop);
     _t.dispose();
+    _developed?.dispose();
     _image?.dispose();
     super.dispose();
   }
@@ -329,11 +455,14 @@ class _ViewerPageState extends State<_ViewerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final img = _image ?? widget.photo.preview;
+    final plain = _image ?? widget.photo.preview;
+    final img = _developed ?? plain;
     if (_failed && img == null) {
       return Center(
-        child: Text("Can't open this photo.",
-            style: AppText.body.copyWith(color: const Color(0xFFFFFFFF))),
+        child: Text(
+          "Can't open this photo.",
+          style: AppText.body.copyWith(color: const Color(0xFFFFFFFF)),
+        ),
       );
     }
     return GestureDetector(
@@ -346,7 +475,9 @@ class _ViewerPageState extends State<_ViewerPage> {
         maxScale: 5,
         child: SizedBox.expand(
           child: img == null
-              ? const Center(child: CupertinoActivityIndicator(color: Color(0xFFFFFFFF)))
+              ? const Center(
+                  child: CupertinoActivityIndicator(color: Color(0xFFFFFFFF)),
+                )
               : CustomPaint(
                   painter: CompositePainter(
                     image: img,

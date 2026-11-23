@@ -156,7 +156,11 @@ void main() {
   ) async {
     await tester.runAsync(() async {
       final store = CountingBatchStore();
-      final c = Rig(Stores(), developer: CpuDeveloper(), batch: store).controller;
+      final c = Rig(
+        Stores(),
+        developer: CpuDeveloper(),
+        batch: store,
+      ).controller;
       await c.init();
       await c.whenIdle();
       final afterInit = store.measures;
@@ -192,10 +196,7 @@ void main() {
         reason: 'a neutral photo keeps its preview',
       );
       // A look does not measure, so only the manifest's growth is missing.
-      expect(
-        a.keptBytes,
-        closeTo(await stores.batch.usedBytes(), 2048),
-      );
+      expect(a.keptBytes, closeTo(await stores.batch.usedBytes(), 2048));
       expect(a.keptBytes, greaterThan(0));
       final look = a.look.toJson();
       final ids = [for (final p in a.photos) p.id];

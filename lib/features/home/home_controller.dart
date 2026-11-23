@@ -101,8 +101,15 @@ class Notice {
 /// app.js ratioText().
 String ratioText(double r) {
   const known = [
-    (1.0, '1:1'), (4 / 5, '4:5'), (3 / 4, '3:4'), (2 / 3, '2:3'), (3 / 2, '3:2'), //
-    (4 / 3, '4:3'), (16 / 9, '16:9'), (9 / 16, '9:16'), (math.sqrt2, 'A4, 1.41:1'),
+    (1.0, '1:1'),
+    (4 / 5, '4:5'),
+    (3 / 4, '3:4'),
+    (2 / 3, '2:3'),
+    (3 / 2, '3:2'), //
+    (4 / 3, '4:3'),
+    (16 / 9, '16:9'),
+    (9 / 16, '9:16'),
+    (math.sqrt2, 'A4, 1.41:1'),
   ];
   for (final (v, t) in known) {
     if ((v - r).abs() < 0.02) return t;
@@ -127,23 +134,26 @@ class HomeController extends ChangeNotifier {
     BatchStore? batchStore,
     PhotoDeveloper? developer,
     Future<PhotoDeveloper?>? developerLoad,
-  })  : _developer = developer,
-        _ownExporter = exporter == null,
-        exporter = exporter ?? PhotoExporter(developer: developer),
-        bundled = bundled ?? loadBundledLayouts,
-        fontStore = fontStore ?? createFontStore(),
-        presetStore = presetStore ?? createPresetStore(),
-        batchStore = batchStore ?? createBatchStore() {
+  }) : _developer = developer,
+       _ownExporter = exporter == null,
+       exporter = exporter ?? PhotoExporter(developer: developer),
+       bundled = bundled ?? loadBundledLayouts,
+       fontStore = fontStore ?? createFontStore(),
+       presetStore = presetStore ?? createPresetStore(),
+       batchStore = batchStore ?? createBatchStore() {
     if (developer == null && developerLoad != null) {
-      _developerReady = developerLoad.then((d) {
-        _developerReady = null;
-        if (d != null) _useDeveloper(d);
-        _changed();
-      }, onError: (Object e) {
-        _developerReady = null;
-        debugPrint('Photo editing is not available: $e');
-        _changed();
-      });
+      _developerReady = developerLoad.then(
+        (d) {
+          _developerReady = null;
+          if (d != null) _useDeveloper(d);
+          _changed();
+        },
+        onError: (Object e) {
+          _developerReady = null;
+          debugPrint('Photo editing is not available: $e');
+          _changed();
+        },
+      );
     }
   }
 
@@ -246,9 +256,14 @@ class HomeController extends ChangeNotifier {
     return null;
   }
 
-  List<PhotoItem> get readyPhotos => [for (final p in photos) if (p.status == PhotoStatus.ready) p];
-  int get loadingCount => photos.where((p) => p.status == PhotoStatus.loading).length;
-  int get errorCount => photos.where((p) => p.status == PhotoStatus.error).length;
+  List<PhotoItem> get readyPhotos => [
+    for (final p in photos)
+      if (p.status == PhotoStatus.ready) p,
+  ];
+  int get loadingCount =>
+      photos.where((p) => p.status == PhotoStatus.loading).length;
+  int get errorCount =>
+      photos.where((p) => p.status == PhotoStatus.error).length;
   bool get saving => job != null;
 
   void _changed() {
@@ -276,7 +291,9 @@ class HomeController extends ChangeNotifier {
     }
     layouts = list;
     final remembered = list.any((l) => l.id == settings.layoutId);
-    selectedId = remembered ? settings.layoutId : (list.isEmpty ? null : list.first.id);
+    selectedId = remembered
+        ? settings.layoutId
+        : (list.isEmpty ? null : list.first.id);
     await _loadPresets();
     await _restoreBatch();
     ready = true;
@@ -324,9 +341,19 @@ class HomeController extends ChangeNotifier {
     await _storeOp(_measureKept);
   }
 
-  PickedPhoto _storedSource(String key, String name, int? size, DateTime? modified, {String? path}) =>
-      PickedPhoto(
-          name: name, path: path, readBytes: () => batchStore.readPhoto(key), size: size, modified: modified);
+  PickedPhoto _storedSource(
+    String key,
+    String name,
+    int? size,
+    DateTime? modified, {
+    String? path,
+  }) => PickedPhoto(
+    name: name,
+    path: path,
+    readBytes: () => batchStore.readPhoto(key),
+    size: size,
+    modified: modified,
+  );
 
   /// Runs [op] after every batch-store operation queued before it. A failure
   /// reaches only this caller; later operations still run.
@@ -374,7 +401,13 @@ class HomeController extends ChangeNotifier {
       photos: [
         for (final p in photos)
           if (p.key != null)
-            BatchPhoto(id: p.id, name: p.name, key: p.key!, size: p.source.size, modified: p.source.modified),
+            BatchPhoto(
+              id: p.id,
+              name: p.name,
+              key: p.key!,
+              size: p.source.size,
+              modified: p.source.modified,
+            ),
       ],
       look: look,
     );
@@ -395,8 +428,14 @@ class HomeController extends ChangeNotifier {
     try {
       for (final f in await fontStore.loadAll()) {
         try {
-          await FontRegistry.instance
-              .register(f.family, f.weight, f.style, f.bytes, variable: f.variable, source: f.source);
+          await FontRegistry.instance.register(
+            f.family,
+            f.weight,
+            f.style,
+            f.bytes,
+            variable: f.variable,
+            source: f.source,
+          );
         } catch (e) {
           debugPrint('Font ${f.family} could not be loaded: $e');
         }
@@ -440,11 +479,20 @@ class HomeController extends ChangeNotifier {
   /// Files dropped on Home (Windows and the website). On the layout row every
   /// file is a layout or a picture to import; elsewhere layout files are
   /// imported and the pictures are added as photos.
-  Future<void> handleDrop(List<PickedPhoto> files, {bool onLayouts = false}) async {
+  Future<void> handleDrop(
+    List<PickedPhoto> files, {
+    bool onLayouts = false,
+  }) async {
     if (files.isEmpty) return;
     if (onLayouts) return importFiles(files);
-    final layoutFiles = [for (final f in files) if (isLayoutFileName(f.name)) f];
-    final photoFiles = [for (final f in files) if (!isLayoutFileName(f.name)) f];
+    final layoutFiles = [
+      for (final f in files)
+        if (isLayoutFileName(f.name)) f,
+    ];
+    final photoFiles = [
+      for (final f in files)
+        if (!isLayoutFileName(f.name)) f,
+    ];
     if (layoutFiles.isNotEmpty) await importFiles(layoutFiles);
     if (photoFiles.isNotEmpty) await addPhotos(photoFiles);
   }
@@ -506,7 +554,9 @@ class HomeController extends ChangeNotifier {
   }
 
   void _enqueue(Future<void> Function() job) {
-    _queue = (_queue ?? Future<void>.value()).then((_) => job()).catchError((Object e) {
+    _queue = (_queue ?? Future<void>.value()).then((_) => job()).catchError((
+      Object e,
+    ) {
       debugPrint('Preview failed: $e');
     });
   }
@@ -538,7 +588,9 @@ class HomeController extends ChangeNotifier {
         final w = desc.width, h = desc.height;
         final s = math.min(1.0, kPreviewEdge / math.max(w, h));
         final codec = await desc.instantiateCodec(
-            targetWidth: math.max(1, (w * s).round()), targetHeight: math.max(1, (h * s).round()));
+          targetWidth: math.max(1, (w * s).round()),
+          targetHeight: math.max(1, (h * s).round()),
+        );
         final frame = await codec.getNextFrame();
         codec.dispose();
         final img = frame.image;
@@ -580,7 +632,13 @@ class HomeController extends ChangeNotifier {
   Future<void> _developThumb(PhotoItem p) async {
     final dev = developer;
     final src = p.preview;
-    if (dev == null || src == null || _disposed || !photos.contains(p) || p.width <= 0) return;
+    if (dev == null ||
+        src == null ||
+        _disposed ||
+        !photos.contains(p) ||
+        p.width <= 0) {
+      return;
+    }
     final s = settingsFor(p);
     final k = _thumbKey(s);
     if (k == p.developedKey) return;
@@ -711,7 +769,11 @@ class HomeController extends ChangeNotifier {
   /// [src] (a preview of a photo [srcPhotoWidth] pixels wide) with [preset]
   /// applied, at a fast table size, for the picker's thumbnails. The caller
   /// owns the result. Null when editing is not available.
-  Future<ui.Image?> developPreview(ui.Image src, int srcPhotoWidth, Preset preset) async {
+  Future<ui.Image?> developPreview(
+    ui.Image src,
+    int srcPhotoWidth,
+    Preset preset,
+  ) async {
     final dev = developer;
     if (dev == null || srcPhotoWidth <= 0) return null;
     final s = EditSettings.resolve([preset.patch]);
@@ -726,7 +788,8 @@ class HomeController extends ChangeNotifier {
   }
 
   /// Makes [p] the shared preset (null for none); single-photo changes stay.
-  Future<void> choosePresetForAll(Preset? p) => setLook(look.withPresetForAll(p?.patch, p?.name, p?.id));
+  Future<void> choosePresetForAll(Preset? p) =>
+      setLook(look.withPresetForAll(p?.patch, p?.name, p?.id));
 
   /// Reads preset and profile files, keeps what they hold and returns the
   /// line to show. Files over [kPresetFileCap] are not read.
@@ -780,7 +843,13 @@ class HomeController extends ChangeNotifier {
 
   /// Keeps [s] as a preset of the person's own.
   Future<Preset> savePreset(String name, EditSettings s) async {
-    final p = Preset(id: uid('P'), name: name, kind: PresetKind.user, created: DateTime.now(), patch: s.toPatch());
+    final p = Preset(
+      id: uid('P'),
+      name: name,
+      kind: PresetKind.user,
+      created: DateTime.now(),
+      patch: s.toPatch(),
+    );
     await _keepPreset(p);
     _changed();
     return p;
@@ -825,43 +894,78 @@ class HomeController extends ChangeNotifier {
       }
       // Thin pictures (borders, lines) don't visibly blur, so only bigger ones are mentioned.
       final soft = widest > 0
-          ? softPictures(item.doc, item.prep, widest, kSoftScale).where((s) => s.natural >= 60).toList()
+          ? softPictures(
+              item.doc,
+              item.prep,
+              widest,
+              kSoftScale,
+            ).where((s) => s.natural >= 60).toList()
           : <SoftPicture>[];
       if (soft.length == 1) {
         final s = soft.first;
-        out.add(Notice(NoteKind.warning,
-            '"${s.name}" is ${s.natural} px wide but gets stretched to ${s.shown} px on your largest photo, so it will look soft. Replace it with a bigger picture in the editor.'));
+        out.add(
+          Notice(
+            NoteKind.warning,
+            '"${s.name}" is ${s.natural} px wide but gets stretched to ${s.shown} px on your largest photo, so it will look soft. Replace it with a bigger picture in the editor.',
+          ),
+        );
       } else if (soft.length > 1) {
-        final list = soft.take(4).map((s) => '"${s.name}" (${s.natural} to ${s.shown} px)').join(', ');
+        final list = soft
+            .take(4)
+            .map((s) => '"${s.name}" (${s.natural} to ${s.shown} px)')
+            .join(', ');
         final more = soft.length > 4 ? ' and ${soft.length - 4} more' : '';
-        out.add(Notice(NoteKind.warning,
-            'Some pictures get stretched on your largest photo and will look soft: $list$more. Use a bigger original picture for a sharp result.'));
+        out.add(
+          Notice(
+            NoteKind.warning,
+            'Some pictures get stretched on your largest photo and will look soft: $list$more. Use a bigger original picture for a sharp result.',
+          ),
+        );
       }
       final missing = FontRegistry.instance.missing(item.doc);
       if (missing.isNotEmpty) {
         final names = missing.map((f) => '"$f"').join(', ');
-        out.add(Notice(NoteKind.warning,
-            "This phone doesn't have the font $names, so a stand-in is used. Add the font under Fonts to fix it."));
+        out.add(
+          Notice(
+            NoteKind.warning,
+            "This phone doesn't have the font $names, so a stand-in is used. Add the font under Fonts to fix it.",
+          ),
+        );
       }
       if (item.doc.fit == DocFit.crop && hasFramePicture(item.doc)) {
-        out.add(Notice(
-          NoteKind.warning,
-          "Photos are cropped to this layout's shape (${ratioText(item.doc.ratio)}), so taller or wider photos lose their edges.",
-          actionLabel: 'Fit every photo shape',
-          action: () => fitEveryShape(item),
-        ));
+        out.add(
+          Notice(
+            NoteKind.warning,
+            "Photos are cropped to this layout's shape (${ratioText(item.doc.ratio)}), so taller or wider photos lose their edges.",
+            actionLabel: 'Fit every photo shape',
+            action: () => fitEveryShape(item),
+          ),
+        );
       }
     }
     if (!storageOk) {
-      out.add(Notice(NoteKind.warning,
-          "Saved layouts can't be read on this $deviceNoun, so layouts you make or import may be gone when the app closes."));
+      out.add(
+        Notice(
+          NoteKind.warning,
+          "Saved layouts can't be read on this $deviceNoun, so layouts you make or import may be gone when the app closes.",
+        ),
+      );
     }
     if (!batchOk) {
-      out.add(Notice(
-          NoteKind.warning, "Photos can't be kept on this $deviceNoun, so they will be gone when the app closes."));
+      out.add(
+        Notice(
+          NoteKind.warning,
+          "Photos can't be kept on this $deviceNoun, so they will be gone when the app closes.",
+        ),
+      );
     }
     if (!editingAvailable && _developerReady == null) {
-      out.add(Notice(NoteKind.info, "Photo editing isn't available on this $deviceNoun."));
+      out.add(
+        Notice(
+          NoteKind.info,
+          "Photo editing isn't available on this $deviceNoun.",
+        ),
+      );
     }
     return out;
   }
@@ -909,8 +1013,10 @@ class HomeController extends ChangeNotifier {
     final result = await fitAnyShape(doc, target.prep, frameHeight(doc));
     if (result.failed != null) {
       layoutNotes = [
-        Notice(NoteKind.error,
-            "\"${result.failed!.name}\" has no see-through middle, so it can't be cut into edge parts. Photos stay cropped to its shape."),
+        Notice(
+          NoteKind.error,
+          "\"${result.failed!.name}\" has no see-through middle, so it can't be cut into edge parts. Photos stay cropped to its shape.",
+        ),
       ];
       _changed();
       return;
@@ -920,8 +1026,10 @@ class HomeController extends ChangeNotifier {
     pruneAssets(doc);
     await layoutChanged(target);
     layoutNotes = [
-      const Notice(NoteKind.info,
-          "Done. The layout is now pinned to the photo's edges, so every photo keeps its full size and shape."),
+      const Notice(
+        NoteKind.info,
+        "Done. The layout is now pinned to the photo's edges, so every photo keeps its full size and shape.",
+      ),
     ];
     await selectLayout(target.id);
   }
@@ -934,11 +1042,13 @@ class HomeController extends ChangeNotifier {
   }
 
   /// "Import a layout file".
-  Future<void> importLayoutFile() async => importFiles(await picker.pickFiles(extensions: ['json']));
+  Future<void> importLayoutFile() async =>
+      importFiles(await picker.pickFiles(extensions: ['json']));
 
   /// "Use a picture": a PNG, JPG or WebP becomes a layout.
-  Future<void> usePicture() async =>
-      importFiles(await picker.pickFiles(extensions: ['png', 'jpg', 'jpeg', 'webp']));
+  Future<void> usePicture() async => importFiles(
+    await picker.pickFiles(extensions: ['png', 'jpg', 'jpeg', 'webp']),
+  );
 
   /// app.js importFiles(): layout files and pictures become layouts.
   Future<void> importFiles(List<PickedPhoto> files) async {
@@ -956,16 +1066,26 @@ class HomeController extends ChangeNotifier {
           doc = d;
           notes.addAll(n);
         } else {
-          throw const ImportProblem('use a layout file (.json) or a PNG, JPG or WebP picture.');
+          throw const ImportProblem(
+            'use a layout file (.json) or a PNG, JPG or WebP picture.',
+          );
         }
         last = await addLayout(doc);
       } catch (e) {
-        final text = e is ImportProblem ? e.message : "this file couldn't be read.";
+        final text = e is ImportProblem
+            ? e.message
+            : "this file couldn't be read.";
         notes.add(Notice(NoteKind.error, '${f.name}: $text'));
       }
     }
     if (last != null) {
-      notes.insert(0, Notice(NoteKind.info, 'Added "${last.doc.name}". Use Edit layout to adjust it.'));
+      notes.insert(
+        0,
+        Notice(
+          NoteKind.info,
+          'Added "${last.doc.name}". Use Edit layout to adjust it.',
+        ),
+      );
     }
     layoutNotes = notes;
     if (last != null) {
@@ -998,7 +1118,8 @@ class HomeController extends ChangeNotifier {
 
   /// Writes `<name>.layout.json` with the fonts it uses and opens the share sheet.
   Future<void> exportLayout(LayoutItem item) async {
-    final doc = item.doc.clone()..fonts = FontRegistry.instance.embedFor(item.doc);
+    final doc = item.doc.clone()
+      ..fonts = FontRegistry.instance.embedFor(item.doc);
     final json = jsonEncode(writeLayout(doc, envelope: true));
     final name = '${safeFileName(doc.name)}.layout.json';
     final bytes = Uint8List.fromList(utf8.encode(json));
@@ -1031,20 +1152,33 @@ class HomeController extends ChangeNotifier {
 
   // ---------- saving ----------
 
-  ExportSettings get exportSettings =>
-      ExportSettings(format: settings.format, quality: settings.quality, suffix: settings.suffix);
+  ExportSettings get exportSettings => ExportSettings(
+    format: settings.format,
+    quality: settings.quality,
+    suffix: settings.suffix,
+  );
 
   String get outputExt => settings.format == OutputFormat.png ? 'png' : 'jpg';
 
   /// What a photo is saved as: "IMG_1_PIO.jpg".
-  String outputName(PhotoItem p) => '${outputStem(p.name, settings.suffix)}.$outputExt';
+  String outputName(PhotoItem p) =>
+      '${outputStem(p.name, settings.suffix)}.$outputExt';
 
   /// Renders [p] with its own settings; exactly as before when editing is
   /// off or the settings are neutral.
   Future<RenderedPhoto> _render(PhotoItem p, Uint8List bytes, LayoutItem item) {
     final s = developer == null ? null : settingsFor(p);
-    if (s == null || s.isNeutral) return exporter.render(bytes, item.doc, item.prep, exportSettings);
-    return exporter.render(bytes, item.doc, item.prep, exportSettings, edit: s, profile: profileFor(s));
+    if (s == null || s.isNeutral) {
+      return exporter.render(bytes, item.doc, item.prep, exportSettings);
+    }
+    return exporter.render(
+      bytes,
+      item.doc,
+      item.prep,
+      exportSettings,
+      edit: s,
+      profile: profileFor(s),
+    );
   }
 
   Future<void> saveAll() async {
@@ -1071,7 +1205,11 @@ class HomeController extends ChangeNotifier {
       started = true;
       if (sharer.needsCopies) await temp.clear('saved');
       String? stopped;
-      for (var i = 0; i < list.length && !j.cancelRequested && stopped == null; i++) {
+      for (
+        var i = 0;
+        i < list.length && !j.cancelRequested && stopped == null;
+        i++
+      ) {
         final p = list[i];
         j
           ..current = i + 1
@@ -1080,8 +1218,14 @@ class HomeController extends ChangeNotifier {
         try {
           final bytes = await p.source.readBytes();
           final out = await _render(p, bytes, item);
-          final name = uniqueName(outputStem(p.name, settings.suffix), out.ext, used);
-          if (sharer.needsCopies) paths.add(await temp.write('saved', name, out.bytes));
+          final name = uniqueName(
+            outputStem(p.name, settings.suffix),
+            out.ext,
+            used,
+          );
+          if (sharer.needsCopies) {
+            paths.add(await temp.write('saved', name, out.bytes));
+          }
           final where = await saver.saveImage(out.bytes, name);
           if (where != null && !sharer.needsCopies) paths.add(where);
           j
@@ -1112,10 +1256,13 @@ class HomeController extends ChangeNotifier {
       } else {
         result = saver.resultLine(j.saved, formatBytes(j.bytes));
         if (stopped != null) {
-          result += ' $stopped ${plural(list.length - j.saved - j.failed.length, 'photo was', 'photos were')} not saved.';
+          result +=
+              ' $stopped ${plural(list.length - j.saved - j.failed.length, 'photo was', 'photos were')} not saved.';
         }
       }
-      if (j.failed.isNotEmpty) result += " Couldn't process ${failedList(j.failed)}.";
+      if (j.failed.isNotEmpty) {
+        result += " Couldn't process ${failedList(j.failed)}.";
+      }
     } catch (e) {
       result = 'Saving stopped: $e';
       if (started) {
@@ -1200,7 +1347,9 @@ class HomeController extends ChangeNotifier {
 bool isMemoryFailure(Object e) {
   if (e is OutOfMemoryError) return true;
   final t = e.toString().toLowerCase();
-  return t.contains('out of memory') || t.contains('allocation failed') || t.contains('invalid array length');
+  return t.contains('out of memory') ||
+      t.contains('allocation failed') ||
+      t.contains('invalid array length');
 }
 
 /// Bytes of a photo, for the viewer and single saves.

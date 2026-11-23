@@ -53,10 +53,13 @@ class BatchManifest {
   final BatchLook look;
 
   Map<String, dynamic> toJson() => {
-    'version': 1,
+    'version': version,
     'photos': [for (final p in photos) p.toJson()],
     'look': look.toJson(),
   };
+
+  /// The newest manifest version this app reads.
+  static const int version = 1;
 
   factory BatchManifest.fromJson(Map<String, dynamic> j) => BatchManifest(
     photos: [
@@ -72,9 +75,12 @@ class BatchManifest {
   /// The manifest from JSON text, or null when it can't be read.
   static BatchManifest? tryDecode(String text) {
     try {
-      return BatchManifest.fromJson(
-        Map<String, dynamic>.from(jsonDecode(text) as Map),
-      );
+      final j = Map<String, dynamic>.from(jsonDecode(text) as Map);
+      // A manifest from a newer app is not read, so it is not overwritten
+      // by a guess.
+      final v = j['version'];
+      if (v is num && v > version) return null;
+      return BatchManifest.fromJson(j);
     } catch (_) {
       return null;
     }

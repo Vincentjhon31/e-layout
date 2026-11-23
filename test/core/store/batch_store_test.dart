@@ -147,4 +147,16 @@ void main() {
     final k = await s.putPhoto('a.png', Uint8List.fromList([5]));
     expect(File('${dir.path}/photos/$k').existsSync(), isTrue);
   });
+
+  test('a manifest from a newer version is unreadable', () {
+    final text = BatchManifest(
+      photos: const [],
+      look: const BatchLook(),
+    ).encode();
+    expect(BatchManifest.tryDecode(text), isNotNull);
+    expect(
+      BatchManifest.tryDecode(text.replaceFirst('"version":1', '"version":2')),
+      isNull,
+    );
+  });
 }

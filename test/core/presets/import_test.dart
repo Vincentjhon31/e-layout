@@ -454,7 +454,7 @@ void main() {
       expect(r.line, endsWith(tooBig));
     });
 
-    test('5000-deep nested XML is is ignored and the preset is read', () {
+    test('5000-deep nested XML is ignored and the preset is read', () {
       final deep = '<crs:Deep>${'<a>' * 5000}${'</a>' * 5000}</crs:Deep>';
       final r = importPresetFiles([
         f('deep.xmp', presetXmp(look: null, children: deep)),

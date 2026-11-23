@@ -618,6 +618,8 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     _shown?.dispose();
     _shown = null;
     _freeFull();
+    // A render still in flight when the editor closed leaves blurs behind.
+    c.developer.clearCache();
   }
 
   // ---------- drawing ----------

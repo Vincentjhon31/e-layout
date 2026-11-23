@@ -73,8 +73,11 @@ Uint8List _encode(_EncodeJob j) => j.format == OutputFormat.jpeg
 /// Renders one photo with the layout on top at the photo's full pixel size, in
 /// tiles so that a photo larger than the GPU's maximum texture is never shrunk.
 class PhotoExporter {
-  PhotoExporter(
-      {this.tileSize = 2048, @visibleForTesting this.forcePixelPath = false, this.developer});
+  PhotoExporter({
+    this.tileSize = 2048,
+    @visibleForTesting this.forcePixelPath = false,
+    this.developer,
+  });
   final int tileSize;
 
   /// Test hook: always take the route used when the engine clamps big pictures.
@@ -87,11 +90,19 @@ class PhotoExporter {
   /// neutral), each tile is cut from the upright photo with the developer's
   /// margin on every side, developed in whole-photo coordinates, cropped back
   /// and the layout drawn on top. Null or neutral edits give today's bytes.
-  Future<RenderedPhoto> render(Uint8List photoBytes, LayoutDoc? doc, LayoutPrep? prep,
-      ExportSettings settings, {EditSettings? edit, ProfileTable? profile}) async {
+  Future<RenderedPhoto> render(
+    Uint8List photoBytes,
+    LayoutDoc? doc,
+    LayoutPrep? prep,
+    ExportSettings settings, {
+    EditSettings? edit,
+    ProfileTable? profile,
+  }) async {
     final e = edit == null || edit.isNeutral ? null : edit;
     final dev = developer;
-    if (e != null && dev == null) throw StateError('Photo editing is not available.');
+    if (e != null && dev == null) {
+      throw StateError('Photo editing is not available.');
+    }
     final jpeg = settings.format == OutputFormat.jpeg;
     ui.Image? src;
     img.Image? pixels; // set when the engine could not decode at full size
@@ -124,7 +135,9 @@ class PhotoExporter {
       ph = src.height;
     } else {
       final decoded = img.decodeImage(photoBytes);
-      if (decoded == null) throw const FormatException('This photo could not be read.');
+      if (decoded == null) {
+        throw const FormatException('This photo could not be read.');
+      }
       pixels = img.bakeOrientation(decoded).convert(numChannels: 4);
       pw = pixels.width;
       ph = pixels.height;
@@ -148,69 +161,107 @@ class PhotoExporter {
           final rec = ui.PictureRecorder();
           final canvas = ui.Canvas(rec);
           ui.Image? tileSrc;
-          if (e != null) {
-            // The tile in the upright photo, with the margin, inside the photo.
-            final px = g.cropX + tx, py = g.cropY + ty;
-            final x0 = math.max(px - margin, 0), y0 = math.max(py - margin, 0);
-            final x1 = math.min(px + tw + margin, pw), y1 = math.min(py + th + margin, ph);
-            final cut = src != null
-                ? await _cutImage(src, x0, y0, x1 - x0, y1 - y0)
-                : await _tileImage(fullBytes!, pw * 4, x0, y0, x1 - x0, y1 - y0);
-            try {
-              tileSrc = await dev!.develop(cut, e,
+          ui.Picture? pic;
+          ui.Image? tile;
+          try {
+            if (e != null) {
+              // The tile in the upright photo, with the margin, inside the photo.
+              final px = g.cropX + tx, py = g.cropY + ty;
+              final x0 = math.max(px - margin, 0),
+                  y0 = math.max(py - margin, 0);
+              final x1 = math.min(px + tw + margin, pw),
+                  y1 = math.min(py + th + margin, ph);
+              final cut = src != null
+                  ? await _cutImage(src, x0, y0, x1 - x0, y1 - y0)
+                  : await _tileImage(
+                      fullBytes!,
+                      pw * 4,
+                      x0,
+                      y0,
+                      x1 - x0,
+                      y1 - y0,
+                    );
+              try {
+                tileSrc = await dev!.develop(
+                  cut,
+                  e,
                   profile: profile,
                   origin: ui.Offset(x0.toDouble(), y0.toDouble()),
                   fullSize: fullSize,
-                  stats: stats);
-            } finally {
-              cut.dispose();
-              // Tiles never share blurs; free them before the next one.
-              dev!.clearCache();
-            }
-            if (jpeg) {
-              canvas.drawRect(ui.Rect.fromLTWH(0, 0, tw.toDouble(), th.toDouble()),
-                  ui.Paint()..color = const ui.Color(0xFFFFFFFF));
-            }
-            canvas.drawImage(
-                tileSrc, ui.Offset((x0 - px).toDouble(), (y0 - py).toDouble()), ui.Paint());
-            if (doc != null) {
+                  stats: stats,
+                );
+              } finally {
+                cut.dispose();
+                // Tiles never share blurs; free them before the next one.
+                dev!.clearCache();
+              }
+              if (jpeg) {
+                canvas.drawRect(
+                  ui.Rect.fromLTWH(0, 0, tw.toDouble(), th.toDouble()),
+                  ui.Paint()..color = const ui.Color(0xFFFFFFFF),
+                );
+              }
+              canvas.drawImage(
+                tileSrc,
+                ui.Offset((x0 - px).toDouble(), (y0 - py).toDouble()),
+                ui.Paint(),
+              );
+              if (doc != null) {
+                canvas.translate(-tx.toDouble(), -ty.toDouble());
+                canvas.scale(g.s, g.s);
+                drawLayout(canvas, doc, prep, g.frameH);
+              }
+            } else if (src != null) {
               canvas.translate(-tx.toDouble(), -ty.toDouble());
-              canvas.scale(g.s, g.s);
-              drawLayout(canvas, doc, prep, g.frameH);
+              if (jpeg) {
+                // transparent photos would otherwise turn black
+                canvas.drawRect(
+                  ui.Rect.fromLTWH(0, 0, g.w.toDouble(), g.h.toDouble()),
+                  ui.Paint()..color = const ui.Color(0xFFFFFFFF),
+                );
+              }
+              paintComposite(canvas, src, 1, g, doc, prep, 1);
+            } else {
+              // The picture region of this tile, 1:1 (output is at photo scale).
+              tileSrc = await _tileImage(
+                fullBytes!,
+                pw * 4,
+                g.cropX + tx,
+                g.cropY + ty,
+                tw,
+                th,
+              );
+              if (jpeg) {
+                canvas.drawRect(
+                  ui.Rect.fromLTWH(0, 0, tw.toDouble(), th.toDouble()),
+                  ui.Paint()..color = const ui.Color(0xFFFFFFFF),
+                );
+              }
+              canvas.drawImage(tileSrc, ui.Offset.zero, ui.Paint());
+              if (doc != null) {
+                canvas.translate(-tx.toDouble(), -ty.toDouble());
+                canvas.scale(g.s, g.s);
+                drawLayout(canvas, doc, prep, g.frameH);
+              }
             }
-          } else if (src != null) {
-            canvas.translate(-tx.toDouble(), -ty.toDouble());
-            if (jpeg) {
-              // transparent photos would otherwise turn black
-              canvas.drawRect(ui.Rect.fromLTWH(0, 0, g.w.toDouble(), g.h.toDouble()),
-                  ui.Paint()..color = const ui.Color(0xFFFFFFFF));
+            pic = rec.endRecording();
+            tile = await pic.toImage(tw, th);
+            final bd = await tile.toByteData(
+              format: ui.ImageByteFormat.rawStraightRgba,
+            );
+            final px = bd!.buffer.asUint8List();
+            for (var y = 0; y < th; y++) {
+              out.setRange(
+                ((ty + y) * g.w + tx) * 4,
+                ((ty + y) * g.w + tx + tw) * 4,
+                px,
+                y * tw * 4,
+              );
             }
-            paintComposite(canvas, src, 1, g, doc, prep, 1);
-          } else {
-            // The picture region of this tile, 1:1 (output is at photo scale).
-            tileSrc = await _tileImage(
-                fullBytes!, pw * 4, g.cropX + tx, g.cropY + ty, tw, th);
-            if (jpeg) {
-              canvas.drawRect(ui.Rect.fromLTWH(0, 0, tw.toDouble(), th.toDouble()),
-                  ui.Paint()..color = const ui.Color(0xFFFFFFFF));
-            }
-            canvas.drawImage(tileSrc, ui.Offset.zero, ui.Paint());
-            if (doc != null) {
-              canvas.translate(-tx.toDouble(), -ty.toDouble());
-              canvas.scale(g.s, g.s);
-              drawLayout(canvas, doc, prep, g.frameH);
-            }
-          }
-          final pic = rec.endRecording();
-          final tile = await pic.toImage(tw, th);
-          final bd = await tile.toByteData(format: ui.ImageByteFormat.rawStraightRgba);
-          tile.dispose();
-          pic.dispose();
-          tileSrc?.dispose();
-          final px = bd!.buffer.asUint8List();
-          for (var y = 0; y < th; y++) {
-            out.setRange(((ty + y) * g.w + tx) * 4, ((ty + y) * g.w + tx + tw) * 4, px,
-                y * tw * 4);
+          } finally {
+            tile?.dispose();
+            pic?.dispose();
+            tileSrc?.dispose();
           }
         }
       }
@@ -219,19 +270,30 @@ class PhotoExporter {
       if (e != null) dev!.clearCache();
     }
 
-    final bytes = await compute(_encode, _EncodeJob(out, g.w, g.h, settings.format, settings.quality));
+    final bytes = await compute(
+      _encode,
+      _EncodeJob(out, g.w, g.h, settings.format, settings.quality),
+    );
     return RenderedPhoto(bytes, g.w, g.h, jpeg ? 'jpg' : 'png');
   }
 
   /// A 1:1 copy of the region (x, y, w, h) of [src].
-  Future<ui.Image> _cutImage(ui.Image src, int x, int y, int w, int h) => recordImage(
-      w,
-      h,
-      (c) => c.drawImageRect(
+  Future<ui.Image> _cutImage(ui.Image src, int x, int y, int w, int h) =>
+      recordImage(
+        w,
+        h,
+        (c) => c.drawImageRect(
           src,
-          ui.Rect.fromLTWH(x.toDouble(), y.toDouble(), w.toDouble(), h.toDouble()),
+          ui.Rect.fromLTWH(
+            x.toDouble(),
+            y.toDouble(),
+            w.toDouble(),
+            h.toDouble(),
+          ),
           ui.Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
-          ui.Paint()));
+          ui.Paint(),
+        ),
+      );
 
   /// Whole-photo values, measured on a copy of about 512 px on the long edge
   /// of the upright photo ([src], or [pixels] on the pixel path).
@@ -243,9 +305,17 @@ class PhotoExporter {
     if (src != null) {
       small = await scaleImage(src, sw, sh);
     } else {
-      final resized = img.copyResize(pixels!,
-          width: sw, height: sh, interpolation: img.Interpolation.average);
-      small = await imageFromRgba(resized.getBytes(order: img.ChannelOrder.rgba), sw, sh);
+      final resized = img.copyResize(
+        pixels!,
+        width: sw,
+        height: sh,
+        interpolation: img.Interpolation.average,
+      );
+      small = await imageFromRgba(
+        resized.getBytes(order: img.ChannelOrder.rgba),
+        sw,
+        sh,
+      );
     }
     try {
       return await measureStats(small);
@@ -255,7 +325,13 @@ class PhotoExporter {
   }
 
   Future<ui.Image> _tileImage(
-      Uint8List full, int stride, int x, int y, int w, int h) {
+    Uint8List full,
+    int stride,
+    int x,
+    int y,
+    int w,
+    int h,
+  ) {
     final bytes = Uint8List(w * h * 4);
     for (var row = 0; row < h; row++) {
       final s = (y + row) * stride + x * 4;

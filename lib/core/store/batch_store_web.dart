@@ -70,7 +70,8 @@ class IdbBatchStore implements BatchStore {
       } else if (k == 'manifest') {
         final v = await _box.get(k);
         if (v != null) n += utf8.encode((v as JSString).toDart).length;
-      } else if (k.startsWith('photo:') && !have.contains('size:${k.substring(6)}')) {
+      } else if (k.startsWith('photo:') &&
+          !have.contains('size:${k.substring(6)}')) {
         final v = await _box.get(k);
         if (v != null) {
           final len = (v as JSUint8Array).toDart.length;
