@@ -137,11 +137,16 @@ void main() {
       run(settings(values: {Setting.whites: -10}), 1, 1, 1).$1,
       lessThan(1),
     );
-    // Pure black is the tone map's fixed point, so use a near-black.
+    final lifted = run(settings(values: {Setting.blacks: 25}), 0, 0, 0);
+    expect(lifted.$1, greaterThan(0));
+    expect(lifted.$2, greaterThan(0));
+    expect(lifted.$3, greaterThan(0));
+    expect(lifted.$1, closeTo(0.0125, 0.003));
     expect(
       run(settings(values: {Setting.blacks: 25}), 0.05, 0.05, 0.05).$1,
       greaterThan(0.05),
     );
+    expect(run(settings(values: {Setting.blacks: -25}), 0, 0, 0).$1, 0);
   });
 
   test('point curve passes through its points', () {
@@ -360,6 +365,12 @@ void main() {
     expect(s.$1, closeTo(0.13, 1e-6));
     expect(s.$2, closeTo(0.57, 1e-6));
     expect(s.$3, closeTo(0.91, 1e-6));
+  });
+
+  test('NaN input gives finite output', () {
+    final p = ColorPipeline(settings(values: {Setting.exposure: 1}));
+    final o = p.apply(double.nan, 0.5, 0.5);
+    expect(o.$1.isFinite && o.$2.isFinite && o.$3.isFinite, isTrue);
   });
 
   test('helpers round trip', () {

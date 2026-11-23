@@ -60,7 +60,8 @@ double _smooth(double e0, double e1, double x) {
   return t * t * (3 - 2 * t);
 }
 
-double _clamp01(double v) => v < 0 ? 0 : (v > 1 ? 1 : v);
+// NaN falls through to 0.
+double _clamp01(double v) => v > 0 ? (v < 1 ? v : 1) : 0;
 
 // ---------------------------------------------------------------------------
 // OkLab (CL crates/color-transform/src/oklab.rs), linear sRGB direct matrices.
@@ -425,7 +426,7 @@ const double _hsStrength = 1.0;
 /// All per-settings work is done in the constructor so [apply] allocates
 /// nothing but the returned record.
 class ColorPipeline {
-  ColorPipeline(EditSettings s, {ProfileTable? profile}) {
+  ColorPipeline(EditSettings s, {ProfileTable? profile}) : _table = profile {
     // White balance and exposure as one linear matrix (notes 6.9, 6.1).
     final temp = s[Setting.temperature], tint = s[Setting.tint];
     final ev = s[Setting.exposure];
@@ -450,6 +451,9 @@ class ColorPipeline {
     _w = s[Setting.whites] / 100;
     _b = s[Setting.blacks] / 100;
     _hasTone = _c != 0 || _w != 0 || _b != 0;
+    // Positive Blacks also lift the black point in display space (not in the
+    // LightCraft notes; a Phase 1 addition so faded looks work).
+    _blackLift = _b > 0 ? 0.10 * math.pow(_b, 1.5).toDouble() : 0;
 
     // Colour block (notes 6.4 to 6.7).
     const hueS = [
@@ -577,14 +581,13 @@ class ColorPipeline {
     }
 
     // Profile (notes 9).
-    _table = profile;
     _amount = s.profile.amount;
     _hasProfile = profile != null && _amount != 0;
   }
 
   final Float64List _m = Float64List(9);
   late final bool _hasMatrix;
-  late final double _hl, _sh, _c, _w, _b;
+  late final double _hl, _sh, _c, _w, _b, _blackLift;
   late final bool _hasHs, _hasTone;
   final Float64List _hueShift = Float64List(8);
   final Float64List _satScale = Float64List(8);
@@ -598,7 +601,7 @@ class ColorPipeline {
   late final double _balanceM, _blendW;
   late final bool _hasCurves;
   final List<Float64List> _lut = List.filled(3, Float64List(0));
-  late final ProfileTable? _table;
+  final ProfileTable? _table;
   late final double _amount;
   late final bool _hasProfile;
 
@@ -633,6 +636,12 @@ class ColorPipeline {
       r = linearToSrgb(_clamp01(_r));
       g = linearToSrgb(_clamp01(_g));
       b = linearToSrgb(_clamp01(_bb));
+      if (_blackLift > 0) {
+        final k = 1 - _blackLift;
+        r = _blackLift + k * r;
+        g = _blackLift + k * g;
+        b = _blackLift + k * b;
+      }
     }
 
     if (_hasCurves) {
