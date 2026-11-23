@@ -33,11 +33,13 @@ Future<void> showPresetPicker(
 
 /// Thumbnails for one picker: each preset applied to the first ready photo's
 /// preview (or the sample scene), made one at a time when a row asks for it,
-/// kept until the picker closes.
+/// kept until the picker closes. With [photoId] they use that photo's preview
+/// when it is ready.
 class PresetThumbs {
-  PresetThumbs(this.controller);
+  PresetThumbs(this.controller, {this.photoId});
 
   final HomeController controller;
+  final int? photoId;
   ui.Image? _source;
   int _sourceWidth = 0;
   bool _ownSource = false;
@@ -48,7 +50,13 @@ class PresetThumbs {
 
   Future<void> _ensureSource() async {
     if (_source != null) return;
-    for (final p in controller.photos) {
+    final all = controller.photos;
+    final first = [
+      for (final p in all)
+        if (p.id == photoId) p,
+      ...all,
+    ];
+    for (final p in first) {
       final img = p.preview;
       if (p.status == PhotoStatus.ready && img != null && p.width > 0) {
         _source = img;

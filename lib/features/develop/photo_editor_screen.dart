@@ -1,15 +1,13 @@
 import 'package:flutter/cupertino.dart';
 
-import '../../core/develop/settings.dart';
 import '../../ui/app_theme.dart';
 import '../../ui/widgets/action_sheet.dart';
 import '../../ui/widgets/app_button.dart';
 import '../../ui/widgets/icon_tile.dart';
 import '../../ui/widgets/pressable.dart';
 import '../../ui/widgets/segmented.dart';
-import '../../ui/widgets/sheet_scaffold.dart';
 import '../../ui/widgets/toast.dart';
-import '../home/export_job.dart' show plural;
+import 'copy_sheet.dart';
 import 'develop_canvas.dart';
 import 'filmstrip.dart';
 import 'panels/develop_slider.dart';
@@ -17,7 +15,9 @@ import 'panels/panel_colour.dart';
 import 'panels/panel_detail.dart';
 import 'panels/panel_effects.dart';
 import 'panels/panel_light.dart';
+import 'panels/panel_presets.dart';
 import 'photo_editor_controller.dart';
+import 'save_preset_sheet.dart';
 import 'select_builder.dart';
 
 /// Windows at least this wide get the tools as a panel beside the photo.
@@ -44,8 +44,7 @@ IconData toolIcon(ToolPanel p) => switch (p) {
   ToolPanel.detail => CupertinoIcons.triangle,
 };
 
-/// The controls of [panel]. Tasks 17 and 18 fill these in; until then each
-/// is an empty area of the panel's size.
+/// The controls of [panel].
 Widget toolPanelBody(
   BuildContext context,
   PhotoEditorController c,
@@ -53,7 +52,7 @@ Widget toolPanelBody(
 ) {
   switch (panel) {
     case ToolPanel.presets:
-      return const SizedBox.expand();
+      return PresetsPanel(controller: c);
     case ToolPanel.light:
       return DevelopPanelShell(child: LightPanel(controller: c));
     case ToolPanel.colour:
@@ -123,92 +122,22 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     showActionSheet(
       context,
       actions: [
-        SheetAction('Copy to all', _copyToAll),
-        SheetAction('Save as preset', _saveAsPreset),
-        SheetAction('Reset this photo', _reset),
+        SheetAction('Copy to all', () => showCopyToAll(context, c)),
+        SheetAction('Save as preset', () => showSavePreset(context, c)),
+        SheetAction('Reset this photo', _reset, enabled: c.hasOwnChanges),
       ],
     );
   }
 
-  void _copyToAll() {
-    final n = c.photos.length - 1;
-    final photos = plural(n, 'photo', 'photos');
-    showAppSheet<void>(
-      context,
-      (ctx) => SheetScaffold(
-        title: 'Copy to all photos',
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              "This photo's light, colour, effects and detail go to every photo. Changes made on single photos stay.",
-              style: AppText.subhead.copyWith(
-                color: AppColors.of(ctx).secondary,
-              ),
-            ),
-            const SizedBox(height: 16),
-            AppButton(
-              label: 'Copy to $photos',
-              onPressed: n <= 0
-                  ? null
-                  : () async {
-                      Navigator.of(ctx).pop();
-                      await c.copyToAll(
-                        ToolGroup.values.toSet(),
-                        keepSingle: true,
-                      );
-                      if (mounted) {
-                        showToast(
-                          context,
-                          'Copied to $photos.',
-                          icon: CupertinoIcons.checkmark_alt,
-                        );
-                      }
-                    },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _saveAsPreset() {
-    showAppSheet<void>(
-      context,
-      (ctx) => _SavePresetSheet(
-        onSave: (name) async {
-          try {
-            await c.saveAsPreset(name);
-          } catch (e) {
-            debugPrint('Could not save the preset: $e');
-            if (mounted) {
-              showToast(
-                context,
-                "Couldn't save the preset.",
-                icon: CupertinoIcons.exclamationmark_circle,
-              );
-            }
-            return;
-          }
-          if (mounted) {
-            showToast(
-              context,
-              'Saved "$name".',
-              icon: CupertinoIcons.checkmark_alt,
-            );
-          }
-        },
-      ),
-    );
-  }
-
   Future<void> _reset() async {
-    if (!c.hasOwnChanges) {
-      showToast(context, 'This photo already follows the shared preset.');
-      return;
-    }
     await c.resetPhoto();
-    if (mounted) showToast(context, 'This photo is back to the shared preset.');
+    if (mounted) {
+      showToast(
+        context,
+        'This photo is back to the shared preset.',
+        icon: CupertinoIcons.checkmark_alt,
+      );
+    }
   }
 
   @override
@@ -603,62 +532,6 @@ class _SidePanel extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-/// "Save as preset": a name, then Save. (Task 18 gives it its final form.)
-class _SavePresetSheet extends StatefulWidget {
-  const _SavePresetSheet({required this.onSave});
-  final Future<void> Function(String name) onSave;
-
-  @override
-  State<_SavePresetSheet> createState() => _SavePresetSheetState();
-}
-
-class _SavePresetSheetState extends State<_SavePresetSheet> {
-  final TextEditingController _name = TextEditingController();
-
-  @override
-  void dispose() {
-    _name.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
-    return SheetScaffold(
-      title: 'Save as preset',
-      doneLabel: 'Cancel',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          CupertinoTextField(
-            controller: _name,
-            autofocus: true,
-            placeholder: 'Preset name',
-            maxLength: 80,
-            style: AppText.body.copyWith(color: colors.text),
-          ),
-          const SizedBox(height: 16),
-          ListenableBuilder(
-            listenable: _name,
-            builder: (context, _) {
-              final name = _name.text.trim();
-              return AppButton(
-                label: 'Save',
-                onPressed: name.isEmpty
-                    ? null
-                    : () async {
-                        Navigator.of(context).pop();
-                        await widget.onSave(name);
-                      },
-              );
-            },
-          ),
-        ],
       ),
     );
   }

@@ -5,10 +5,13 @@ import 'pressable.dart';
 
 /// One row of an [AppActionSheet].
 class SheetAction {
-  const SheetAction(this.label, this.onPressed, {this.destructive = false});
+  const SheetAction(this.label, this.onPressed, {this.destructive = false, this.enabled = true});
   final String label;
   final VoidCallback onPressed;
   final bool destructive;
+
+  /// False greys the row out and ignores taps; the sheet stays open.
+  final bool enabled;
 }
 
 /// A flat iOS-style action sheet (no blur): an optional title and message,
@@ -48,11 +51,13 @@ class AppActionSheet extends StatelessWidget {
       if (rows.isNotEmpty) rows.add(Container(height: 0.5, color: c.separator));
       rows.add(_SheetRow(
         label: a.label,
-        color: a.destructive ? c.destructive : c.accent,
-        onPressed: () {
-          Navigator.of(context).pop();
-          a.onPressed();
-        },
+        color: !a.enabled ? c.secondary : (a.destructive ? c.destructive : c.accent),
+        onPressed: !a.enabled
+            ? null
+            : () {
+                Navigator.of(context).pop();
+                a.onPressed();
+              },
       ));
     }
     return SafeArea(
@@ -96,7 +101,7 @@ class _SheetRow extends StatelessWidget {
   const _SheetRow({required this.label, required this.color, required this.onPressed, this.strong = false});
   final String label;
   final Color color;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final bool strong;
 
   @override
