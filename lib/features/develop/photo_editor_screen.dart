@@ -12,6 +12,11 @@ import '../../ui/widgets/toast.dart';
 import '../home/export_job.dart' show plural;
 import 'develop_canvas.dart';
 import 'filmstrip.dart';
+import 'panels/develop_slider.dart';
+import 'panels/panel_colour.dart';
+import 'panels/panel_detail.dart';
+import 'panels/panel_effects.dart';
+import 'panels/panel_light.dart';
 import 'photo_editor_controller.dart';
 import 'select_builder.dart';
 
@@ -50,13 +55,13 @@ Widget toolPanelBody(
     case ToolPanel.presets:
       return const SizedBox.expand();
     case ToolPanel.light:
-      return const SizedBox.expand();
+      return DevelopPanelShell(child: LightPanel(controller: c));
     case ToolPanel.colour:
-      return const SizedBox.expand();
+      return DevelopPanelShell(child: ColourPanel(controller: c));
     case ToolPanel.effects:
-      return const SizedBox.expand();
+      return DevelopPanelShell(child: EffectsPanel(controller: c));
     case ToolPanel.detail:
-      return const SizedBox.expand();
+      return DevelopPanelShell(child: DetailPanel(controller: c));
   }
 }
 
