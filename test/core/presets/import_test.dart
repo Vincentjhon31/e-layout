@@ -454,16 +454,42 @@ void main() {
       expect(r.line, endsWith(tooBig));
     });
 
-    test('5000-deep nested XML does not throw', () {
+    test('5000-deep nested XML is is ignored and the preset is read', () {
       final deep = '<crs:Deep>${'<a>' * 5000}${'</a>' * 5000}</crs:Deep>';
-      late ImportResult r;
-      expect(
-        () => r = importPresetFiles([
-          f('deep.xmp', presetXmp(look: null, children: deep)),
-        ]),
-        returnsNormally,
-      );
-      expect(r.line, isNotEmpty);
+      final r = importPresetFiles([
+        f('deep.xmp', presetXmp(look: null, children: deep)),
+      ]);
+      // The deep element is simply ignored: the preset is read.
+      expect(r.presets, hasLength(1));
+      expect(r.line, 'Imported "Soft Test".');
+    });
+
+    test('a forged small declared size cannot hide a big entry', () {
+      final z = zipOf({
+        'a.xmp': presetXmp(look: null).codeUnits,
+        'bomb.lrtemplate': Uint8List(9 * 1024 * 1024),
+      });
+      // Overwrite every declared uncompressed size with 100.
+      final d = ByteData.sublistView(z);
+      var patched = 0;
+      for (var i = 0; i + 30 < z.length; i++) {
+        if (z[i] != 0x50 || z[i + 1] != 0x4B) continue;
+        if (z[i + 2] == 3 && z[i + 3] == 4) {
+          if (d.getUint32(i + 22, Endian.little) == 9 * 1024 * 1024) {
+            d.setUint32(i + 22, 100, Endian.little);
+            patched++;
+          }
+        } else if (z[i + 2] == 1 && z[i + 3] == 2) {
+          if (d.getUint32(i + 24, Endian.little) == 9 * 1024 * 1024) {
+            d.setUint32(i + 24, 100, Endian.little);
+            patched++;
+          }
+        }
+      }
+      expect(patched, greaterThan(0));
+      final r = importPresetFiles([('forged.zip', z)]);
+      expect(r.presets, hasLength(1));
+      expect(r.line, 'Imported "Soft Test".$tooBig');
     });
 
     test('an lrtemplate nested deeper than 40 is skipped', () {

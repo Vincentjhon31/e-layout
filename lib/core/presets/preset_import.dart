@@ -51,6 +51,7 @@ String _randomId() {
 const _mb = 1024 * 1024;
 const _maxText = 8 * _mb;
 const _maxDng = 200 * _mb;
+const _maxDngInZip = 64 * _mb;
 const _maxEntries = 500;
 const _maxTotal = 256 * _mb;
 
@@ -60,7 +61,39 @@ class _Budget {
   int total = 0;
 }
 
-int _cap(String lower) => lower.endsWith('.dng') ? _maxDng : _maxText;
+int _cap(String lower, {bool inZip = false}) =>
+    lower.endsWith('.dng') ? (inZip ? _maxDngInZip : _maxDng) : _maxText;
+
+const _readable = ['.xmp', '.dng', '.lrtemplate', '.zip'];
+
+class _EntryTooBig implements Exception {
+  const _EntryTooBig();
+}
+
+/// The content of a zip entry, inflated by us under a hard output [limit]
+/// (the declared size in the zip is not trusted). Null if the entry uses a
+/// method we do not read. Throws [_EntryTooBig] when over the limit.
+Uint8List? _entryBytes(ArchiveFile f, int limit) {
+  final raw = f.rawContent;
+  if (raw == null) return null;
+  final packed = raw.getStream(decompress: false).toUint8List();
+  if (!raw.isCompressed) {
+    // Stored: capped by its own length.
+    if (packed.length > limit) throw const _EntryTooBig();
+    return packed;
+  }
+  if (f.compression != CompressionType.deflate) return null;
+  try {
+    return const ZLibDecoder().decodeBytes(
+      packed,
+      raw: true,
+      throwOnError: true,
+      maxOutputSize: limit,
+    );
+  } on ArchiveLimitException {
+    throw const _EntryTooBig();
+  }
+}
 
 void _read(
   String name,
@@ -88,17 +121,17 @@ void _read(
           budget.tooBig = true;
           break;
         }
-        // Check the declared size before anything is decompressed.
-        if (f.size > _cap(f.name.toLowerCase()) ||
-            budget.total + f.size > _maxTotal) {
-          budget.tooBig = true;
-          continue;
-        }
+        final lowName = f.name.toLowerCase();
+        if (!_readable.any(lowName.endsWith)) continue; // not worth inflating
+        final cap = _cap(lowName, inZip: true);
+        final limit = min(cap, _maxTotal - budget.total);
         try {
-          final data = f.readBytes();
+          final data = _entryBytes(f, limit);
           if (data == null || data.isEmpty) continue;
-          budget.total += data.length;
-          _read(f.name, Uint8List.fromList(data), out, depth + 1, budget);
+          budget.total += data.length; // counted after a successful decode
+          _read(f.name, data, out, depth + 1, budget);
+        } on _EntryTooBig {
+          budget.tooBig = true;
         } catch (_) {
           continue; // one bad file must not stop the rest
         }
