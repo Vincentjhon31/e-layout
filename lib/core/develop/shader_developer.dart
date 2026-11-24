@@ -48,6 +48,16 @@ import 'settings.dart';
 //   float index  name    meaning
 //    0, 1        uSize   output (= base) size, px
 // Samplers: 0 uBase, 1 uLocal, 2 uCov. All three are drawn images.
+//
+// Uniform layout of shaders/lens_blur.frag:
+//   float index  name     meaning
+//    0, 1        uSize    output (= image so far) size, px
+//    2           uRadius  disc radius at focus 0, px
+//    3           uCap     largest radius allowed (tile budget), px
+//    4           uPower   1 + Transition/50
+//    5           uBoost   Boost/25
+// Samplers: 0 uSrc (the image so far), 1 uFocus (the focus map). Both are
+// drawn images.
 
 /// The blurred copies the shader reads.
 enum _Blur { nrLum, nrCol, sharp, tex, clar }
@@ -207,27 +217,66 @@ class _Plan {
   }
 }
 
-/// The largest total blur reach, in render px, that masks may bring the
-/// margin up to: with it, an exported piece (a 64 px step plus the margin on
-/// both sides) stays within 2048 px.
+/// The largest total blur reach, in render px, that masks and the lens blur
+/// may bring the margin up to: with it, an exported piece (a 64 px step plus
+/// the margin on both sides) stays within 2048 px.
 const int kMaxMarginPx = 960;
 
-/// The main pass's plan, and the plan of each mask with an effect, in order.
+/// The lens blur pass's numbers for one photo size (render px).
+class _LensPlan {
+  _LensPlan(this.lens, ui.Size full)
+    : radius = lens.isOn
+          ? lens.amount / 100 * 0.02 * math.max(full.width, full.height)
+          : 0,
+      power = 1 + lens.transition / 50,
+      boost = lens.boost / 25 {
+    cap = radius;
+  }
+
+  final LensBlur lens;
+
+  /// The disc radius at focus 0: Amount/100 x 2 % of the long edge.
+  final double radius;
+  final double power, boost;
+
+  /// The largest radius the pass may use: [radius] unless the tile budget
+  /// cuts it (see [_plans]).
+  late double cap;
+
+  bool get isOn => cap > 0 && radius > 0;
+
+  /// The largest radius, rounded up, plus 2 px for the bilinear taps and
+  /// rounding; 0 when off.
+  int get margin => isOn ? cap.ceil() + 2 : 0;
+}
+
+/// The main pass's plan, the plan of each mask with an effect, in order, and
+/// the lens blur's.
 ///
-/// A mask's pass blurs the image so far, so the reaches add. When the main
-/// reach plus the masks' would pass [kMaxMarginPx], every mask's blurs
-/// (texture, clarity, dehaze) are narrowed by one factor so the total fits.
-/// The main pass's blurs are never narrowed. This is a rare-case
-/// approximation: it only binds with several clarity masks on very large
-/// photos at full size. [ShaderDeveloper.margin] and
-/// [ShaderDeveloper.develop] both use it, so tiles still match whole renders.
-(_Plan, List<(Mask, _Plan)>) _plans(
+/// A mask's pass blurs the image so far, and the lens blur (last) blurs the
+/// masks' output, so the reaches add. When they would pass [kMaxMarginPx],
+/// every mask's blurs (texture, clarity, dehaze) are narrowed by one factor
+/// so the total fits; the lens blur keeps its reach. If the main reach plus
+/// the lens blur's alone pass the cap, the masks' blurs are off and the
+/// lens radius is cut to the room left (the in-focus pixels and the
+/// transition below that radius are unchanged). The main pass's blurs are
+/// never narrowed. Both are rare-case approximations: they only bind on very
+/// large photos at full size. [ShaderDeveloper.margin] and
+/// [ShaderDeveloper.develop] both use this, so tiles still match whole
+/// renders.
+(_Plan, List<(Mask, _Plan)>, _LensPlan) _plans(
   EditSettings s,
   double scale,
   ui.Size full, {
   int cap = kMaxMarginPx,
 }) {
   final main = _Plan(s, scale, full);
+  final lens = _LensPlan(s.lensBlur, full);
+  if (main.margin + lens.margin > cap) {
+    // ceil(cap) + 2 must fit in the room left.
+    lens.cap = math.max(0, cap - main.margin - 2).toDouble();
+  }
+  final maskCap = cap - lens.margin;
   final masks = [
     for (final m in s.masks)
       if (m.hasEffect) (m, _Plan(maskSettings(m), scale, full)),
@@ -236,13 +285,13 @@ const int kMaxMarginPx = 960;
   for (final e in masks) {
     total += e.$2.margin;
   }
-  if (total > cap) {
+  if (total > maskCap) {
     final blurred = [
       for (final e in masks)
         if (e.$2.sigmas.isNotEmpty) e.$2,
     ];
     // Each narrowed reach is ceil(3 sigma k) + 2 <= 3 sigma k + 3.
-    final room = cap - main.margin - 3 * blurred.length;
+    final room = maskCap - main.margin - 3 * blurred.length;
     var need = 0.0;
     for (final p in blurred) {
       need += 3 * p.maxSigma;
@@ -252,7 +301,7 @@ const int kMaxMarginPx = 960;
       p.narrow(k);
     }
   }
-  return (main, masks);
+  return (main, masks, lens);
 }
 
 /// The blurred copies of one source image at one scale and photo size.
@@ -304,26 +353,44 @@ class _BlurSet {
 /// [maskSettings] (its own colour table and blurs of that image, so its
 /// texture, clarity and dehaze use the main pass's maths), then
 /// shaders/mask_apply.frag mixes the two by the mask's coverage.
+///
+/// The lens blur ([LensBlur]) runs last, after the masks:
+/// shaders/lens_blur.frag blurs the image so far by a focus map the size of
+/// the region (see [_focusFor]).
 class ShaderDeveloper implements PhotoDeveloper {
-  ShaderDeveloper._(this._program, this._applyProgram, this._raster);
+  ShaderDeveloper._(
+    this._program,
+    this._applyProgram,
+    this._lensProgram,
+    this._raster,
+  );
 
   static Future<ShaderDeveloper> load() async => ShaderDeveloper._(
     await ui.FragmentProgram.fromAsset(_asset),
     await ui.FragmentProgram.fromAsset(_applyAsset),
+    await ui.FragmentProgram.fromAsset(_lensAsset),
     await MaskRasterizer.load(),
   );
 
   static const String _asset = 'shaders/develop.frag';
   static const String _applyAsset = 'shaders/mask_apply.frag';
+  static const String _lensAsset = 'shaders/lens_blur.frag';
 
   final ui.FragmentProgram _program;
   final ui.FragmentProgram _applyProgram;
+  final ui.FragmentProgram _lensProgram;
   final MaskRasterizer _raster;
 
   // Mask coverage per (components, region, photo size, scale, and the auto
-  // maps or source they read), the last [_maxCoverages], newest last.
+  // maps or source they read), and the lens blur's point focus maps, the
+  // last [_maxCoverages], newest last. One more than the masks, so the lens
+  // focus does not push out a mask's coverage on every render.
   final List<_Coverage> _coverages = [];
-  static const int _maxCoverages = 8;
+  static const int _maxCoverages = kMaxMasks + 1;
+
+  /// How many point focus maps this developer has drawn, for tests.
+  @visibleForTesting
+  int debugFocusMapsDrawn = 0;
   // Bumped by clearCache, so a coverage drawn across it is not kept.
   int _coverageGen = 0;
 
@@ -353,15 +420,21 @@ class ShaderDeveloper implements PhotoDeveloper {
   String? _lutKey;
   ProfileTable? _lutProfile;
 
-  /// The main pass's blur reach plus each mask's: a mask's pass blurs the
-  /// main pass's output (and the masks before it), so the reaches add. The
-  /// masks' share is capped so the total stays within [kMaxMarginPx] (see
-  /// [_plans]); the main pass's own reach is never cut.
+  /// The main pass's blur reach plus each mask's plus the lens blur's
+  /// largest radius: each pass blurs the output of the ones before it, so
+  /// the reaches add. The masks' share, then the lens blur's, is capped so
+  /// the total stays within [kMaxMarginPx] (see [_plans]); the main pass's
+  /// own reach is never cut.
   @override
   int margin(EditSettings s, double scale, {required ui.Size fullSize}) {
     assert(scale > 0);
-    final (main, masks) = _plans(s, scale, fullSize, cap: debugMaxMarginPx);
-    var m = main.margin;
+    final (main, masks, lens) = _plans(
+      s,
+      scale,
+      fullSize,
+      cap: debugMaxMarginPx,
+    );
+    var m = main.margin + lens.margin;
     for (final e in masks) {
       m += e.$2.margin;
     }
@@ -384,7 +457,7 @@ class ShaderDeveloper implements PhotoDeveloper {
     assert(lutSize >= 2);
     final full =
         fullSize ?? ui.Size(src.width.toDouble(), src.height.toDouble());
-    final (main, masks) = _plans(s, scale, full, cap: debugMaxMarginPx);
+    final (main, masks, lens) = _plans(s, scale, full, cap: debugMaxMarginPx);
     var cur = await _developMain(
       src,
       s,
@@ -413,6 +486,27 @@ class ShaderDeveloper implements PhotoDeveloper {
         );
         cur.dispose();
         cur = next;
+      }
+      if (lens.isOn) {
+        final focus = await _focusFor(
+          lens.lens,
+          s,
+          src: src,
+          origin: origin,
+          full: full,
+          scale: scale,
+          auto: auto,
+        );
+        if (focus != null) {
+          final ui.Image next;
+          try {
+            next = await _lensPass(cur, focus, lens);
+          } finally {
+            focus.dispose();
+          }
+          cur.dispose();
+          cur = next;
+        }
       }
       done = true;
       return cur;
@@ -626,6 +720,141 @@ class ShaderDeveloper implements PhotoDeveloper {
     }
   }
 
+  /// The lens blur's focus map of [src]'s region (in focus = 1, in alpha), a
+  /// drawn image the caller disposes, or null when everything is in focus.
+  ///
+  /// - [LensFocus.subject]: the automatic subject, stretched over the photo
+  ///   as a Subject mask component draws it; null without [auto].
+  /// - [LensFocus.point]: a radial fall-off around (fx, fy) ([_pointFocus]).
+  /// - [LensFocus.mask]: the coverage of the mask [LensBlur.maskId] names; a
+  ///   missing mask, or one with no components, means the subject.
+  ///
+  /// Subject and mask maps share the mask coverage cache (keyed by the
+  /// components, region, photo size, scale and the auto maps or source they
+  /// read), so a focus mask that also has an effect is drawn once. Point
+  /// maps are cached there too, by their own key.
+  Future<ui.Image?> _focusFor(
+    LensBlur l,
+    EditSettings s, {
+    required ui.Image src,
+    required ui.Offset origin,
+    required ui.Size full,
+    required double scale,
+    required AutoMapsSource? auto,
+  }) async {
+    switch (l.focus) {
+      case LensFocus.point:
+        final key = jsonEncode([
+          'lens point',
+          l.fx,
+          l.fy,
+          l.transition,
+          origin.dx,
+          origin.dy,
+          src.width,
+          src.height,
+          full.width,
+          full.height,
+          scale,
+        ]);
+        return _cached(key, null, null, () async {
+          final img = await _pointFocus(l, src.width, src.height, origin, full);
+          debugFocusMapsDrawn++;
+          return img;
+        });
+      case LensFocus.mask:
+        for (final m in s.masks) {
+          if (m.id == l.maskId && m.components.isNotEmpty) {
+            return _coverageFor(m, src, origin, full, scale, auto);
+          }
+        }
+      case LensFocus.subject:
+        break;
+    }
+    if (auto == null) return null;
+    return _coverageFor(_subjectFocus, src, origin, full, scale, auto);
+  }
+
+  static final Mask _subjectFocus = Mask(
+    id: 'lens subject',
+    components: [MaskComponent(const SubjectShape())],
+  );
+
+  /// The point focus of a w x h region at [origin]: full inside
+  /// `0.08 + 0.3 x (1 - Transition/100)` of the long edge from (fx, fy),
+  /// falling as a smoothstep (8 steps) to 0 over a further
+  /// `0.05 + 0.4 x Transition/100` of it.
+  static Future<ui.Image> _pointFocus(
+    LensBlur l,
+    int w,
+    int h,
+    ui.Offset origin,
+    ui.Size full,
+  ) {
+    final long = math.max(full.width, full.height);
+    final t = l.transition / 100;
+    final inner = (0.08 + 0.3 * (1 - t)) * long;
+    final outer = inner + (0.05 + 0.4 * t) * long;
+    const steps = 8;
+    final colors = <ui.Color>[const ui.Color(0xFFFFFFFF)];
+    final stops = <double>[0];
+    for (var k = 0; k <= steps; k++) {
+      final x = k / steps;
+      final a = 1 - x * x * (3 - 2 * x);
+      colors.add(ui.Color.fromARGB((a * 255).round(), 255, 255, 255));
+      stops.add((inner + (outer - inner) * x) / outer);
+    }
+    final centre = ui.Offset(l.fx * full.width, l.fy * full.height) - origin;
+    return recordImage(
+      w,
+      h,
+      (c) => c.drawPaint(
+        ui.Paint()
+          ..shader = ui.Gradient.radial(
+            centre,
+            outer,
+            colors,
+            stops,
+            ui.TileMode.clamp,
+          ),
+      ),
+    );
+  }
+
+  /// lens_blur.frag over [cur] (the image so far) with [focus], a new image.
+  Future<ui.Image> _lensPass(
+    ui.Image cur,
+    ui.Image focus,
+    _LensPlan plan,
+  ) async {
+    final w = cur.width, h = cur.height;
+    final sh = _lensProgram.fragmentShader();
+    try {
+      var i = 0;
+      void f(double v) => sh.setFloat(i++, v);
+      f(w.toDouble());
+      f(h.toDouble());
+      f(plan.radius);
+      f(plan.cap);
+      f(plan.power);
+      f(plan.boost);
+      // Taps fall between texels: bilinear. Reads at texel centres stay
+      // exact, so in-focus pixels are unchanged.
+      sh.setImageSampler(0, cur, filterQuality: ui.FilterQuality.low);
+      sh.setImageSampler(1, focus, filterQuality: ui.FilterQuality.low);
+      return await recordImage(
+        w,
+        h,
+        (c) => c.drawRect(
+          ui.Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+          ui.Paint()..shader = sh,
+        ),
+      );
+    } finally {
+      sh.dispose();
+    }
+  }
+
   /// A handle the caller disposes to [m]'s coverage of [src]'s region,
   /// drawn once per (components, region, photo size, scale, inputs).
   Future<ui.Image> _coverageFor(
@@ -647,6 +876,28 @@ class ShaderDeveloper implements PhotoDeveloper {
     );
     final a = readsAuto ? auto : null;
     final r = readsSrc ? src : null;
+    return _cached(key, a, r, () async {
+      final img = await _raster.coverage(
+        m,
+        src: src,
+        origin: origin,
+        fullSize: full,
+        scale: scale,
+        auto: auto,
+      );
+      debugCoveragesDrawn++;
+      return img;
+    });
+  }
+
+  /// A handle the caller disposes to the cached image for ([key], [a],
+  /// [r]), made with [draw] when it is not cached.
+  Future<ui.Image> _cached(
+    String key,
+    AutoMapsSource? a,
+    ui.Image? r,
+    Future<ui.Image> Function() draw,
+  ) async {
     for (final c in _coverages) {
       if (c.matches(key, a, r)) {
         _coverages
@@ -656,15 +907,7 @@ class ShaderDeveloper implements PhotoDeveloper {
       }
     }
     final gen = _coverageGen;
-    final img = await _raster.coverage(
-      m,
-      src: src,
-      origin: origin,
-      fullSize: full,
-      scale: scale,
-      auto: auto,
-    );
-    debugCoveragesDrawn++;
+    final img = await draw();
     if (gen != _coverageGen) return img;
     for (final c in _coverages) {
       if (c.matches(key, a, r)) {

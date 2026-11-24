@@ -92,6 +92,27 @@ void main() {
     }
   });
 
+  test('lens_blur.frag flips every texture read on OpenGL ES', () {
+    final src = File('shaders/lens_blur.frag').readAsStringSync();
+    // Both inputs (the image so far and the focus map) are drawn images,
+    // read at many positions through one helper that flips on GLES.
+    final helper = RegExp(
+      r'vec2\s+uvOf\(vec2\s+p\)\s*\{\s*vec2\s+uv\s*=\s*p\s*/\s*uSize\s*;\s*'
+      r'#ifdef\s+IMPELLER_TARGET_OPENGLES\s+uv\.y\s*=\s*1\.0\s*-\s*uv\.y\s*;\s*'
+      r'#endif\s*return\s+uv\s*;\s*\}',
+    );
+    expect(helper.hasMatch(src), isTrue, reason: 'GLES flip helper missing');
+    final reads = RegExp(r'texture\(\s*(\w+)\s*,\s*([^)]*)').allMatches(src);
+    expect(reads.map((m) => m.group(1)).toSet(), {'uSrc', 'uFocus'});
+    for (final m in reads) {
+      expect(
+        m.group(2)!.trim(),
+        startsWith('uvOf('),
+        reason: '${m.group(0)} must read through uvOf',
+      );
+    }
+  });
+
   testWidgets('range masks sample a drawn copy of the source', (tester) async {
     await tester.runAsync(() async {
       final r = await MaskRasterizer.load();

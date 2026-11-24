@@ -41,7 +41,8 @@ abstract class PhotoDeveloper {
   ///
   /// After the global edits, each mask with an effect ([Mask.hasEffect]) is
   /// applied in order: the image so far is developed with the mask's
-  /// [maskSettings] and mixed back by the mask's coverage.
+  /// [maskSettings] and mixed back by the mask's coverage. Last, when
+  /// [EditSettings.lensBlur] is on, what is out of focus is blurred.
   Future<ui.Image> develop(
     ui.Image src,
     EditSettings s, {
@@ -57,7 +58,7 @@ abstract class PhotoDeveloper {
   /// The tile overlap, in render pixels, so that tiles cut with this much
   /// extra on every side and cropped back match one whole render.
   /// [fullSize] is the whole photo in render pixels, as in [develop]:
-  /// texture and clarity reach a fraction of its long edge.
+  /// texture, clarity and the lens blur reach a fraction of its long edge.
   int margin(EditSettings s, double scale, {required ui.Size fullSize});
 
   /// Frees the cached blurred copies (they hold on to the last sources).
@@ -85,6 +86,11 @@ bool needsStats(EditSettings s) =>
 /// each mask's tone and colour deltas mixed in by its coverage
 /// ([MaskRasterizer]). Effects and detail settings, global or in a mask, are
 /// ignored. For tests and as a fake in later tasks.
+///
+/// The lens blur is a rough stand-in, so tests and fakes see something
+/// blurred: the same focus maps, radius and weights as ShaderDeveloper's
+/// lens_blur.frag, but nearest-pixel taps averaged on the encoded values. It
+/// does not match the GPU's output and is not meant to.
 class CpuDeveloper implements PhotoDeveloper {
   MaskRasterizer? _raster;
 
@@ -146,11 +152,138 @@ class CpuDeveloper implements PhotoDeveloper {
         );
       }
     }
+    final lens = s.lensBlur;
+    if (lens.isOn) {
+      final focus = await _cpuFocus(lens, s, src, origin, full, scale, auto);
+      if (focus != null) {
+        _cpuLensBlur(px, src.width, src.height, focus, lens, full);
+      }
+    }
     return imageFromRgba(px, src.width, src.height);
   }
 
+  /// Focus 0 to 1 per pixel of [src]'s region, or null when all is in focus.
+  Future<Float32List?> _cpuFocus(
+    LensBlur l,
+    EditSettings s,
+    ui.Image src,
+    ui.Offset origin,
+    ui.Size full,
+    double scale,
+    AutoMapsSource? auto,
+  ) async {
+    final w = src.width, h = src.height;
+    final out = Float32List(w * h);
+    if (l.focus == LensFocus.point) {
+      final long = math.max(full.width, full.height);
+      final t = l.transition / 100;
+      final inner = (0.08 + 0.3 * (1 - t)) * long;
+      final band = (0.05 + 0.4 * t) * long;
+      final cx = l.fx * full.width - origin.dx;
+      final cy = l.fy * full.height - origin.dy;
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+          final d = math.sqrt(
+            math.pow(x + 0.5 - cx, 2) + math.pow(y + 0.5 - cy, 2),
+          );
+          final k = ((d - inner) / band).clamp(0.0, 1.0);
+          out[y * w + x] = 1 - k * k * (3 - 2 * k);
+        }
+      }
+      return out;
+    }
+    Mask? m;
+    if (l.focus == LensFocus.mask) {
+      for (final c in s.masks) {
+        if (c.id == l.maskId && c.components.isNotEmpty) m = c;
+      }
+    }
+    if (m == null) {
+      if (auto == null) return null;
+      m = Mask(
+        id: 'lens subject',
+        components: [MaskComponent(const SubjectShape())],
+      );
+    }
+    final r = _raster ??= await MaskRasterizer.load();
+    final cov = await r.coverage(
+      m,
+      src: src,
+      origin: origin,
+      fullSize: full,
+      scale: scale,
+      auto: auto,
+    );
+    final Uint8List a;
+    try {
+      a = await readRgba(cov);
+    } finally {
+      cov.dispose();
+    }
+    for (var i = 0; i < out.length; i++) {
+      out[i] = a[i * 4 + 3] / 255;
+    }
+    return out;
+  }
+
+  /// 48 golden-angle taps per pixel, nearest pixel, weighted as in
+  /// lens_blur.frag (focus down-weight and highlight boost).
+  static void _cpuLensBlur(
+    Uint8List px,
+    int w,
+    int h,
+    Float32List focus,
+    LensBlur l,
+    ui.Size full,
+  ) {
+    final rMax = _lensRadius(l, full);
+    final power = 1 + l.transition / 50;
+    final boost = l.boost / 25;
+    final src = Uint8List.fromList(px);
+    const taps = 48, golden = 2.39996323;
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        final f0 = focus[y * w + x];
+        if (f0 >= 1) continue;
+        final r = rMax * math.pow(1 - f0, power);
+        if (r <= 0) continue;
+        var sr = 0.0, sg = 0.0, sb = 0.0, sw = 0.0;
+        for (var i = 0; i < taps; i++) {
+          final rr = r * math.sqrt((i + 0.5) / taps);
+          final th = i * golden;
+          final qx = (x + rr * math.cos(th)).round().clamp(0, w - 1);
+          final qy = (y + rr * math.sin(th)).round().clamp(0, h - 1);
+          final q = qy * w + qx;
+          final o = q * 4;
+          final lum =
+              (0.2126 * src[o] + 0.7152 * src[o + 1] + 0.0722 * src[o + 2]) /
+              255;
+          final wt =
+              (1 - math.max(0.0, focus[q] - f0)) *
+              (1 + boost * math.max(0.0, lum - 0.75) * 4);
+          sr += src[o] * wt;
+          sg += src[o + 1] * wt;
+          sb += src[o + 2] * wt;
+          sw += wt;
+        }
+        if (sw <= 1e-5) continue;
+        final o = (y * w + x) * 4;
+        px[o] = (sr / sw).round().clamp(0, 255);
+        px[o + 1] = (sg / sw).round().clamp(0, 255);
+        px[o + 2] = (sb / sw).round().clamp(0, 255);
+      }
+    }
+  }
+
+  static double _lensRadius(LensBlur l, ui.Size full) =>
+      l.isOn ? l.amount / 100 * 0.02 * math.max(full.width, full.height) : 0;
+
+  /// Only the lens blur reaches past a pixel here.
   @override
-  int margin(EditSettings s, double scale, {required ui.Size fullSize}) => 0;
+  int margin(EditSettings s, double scale, {required ui.Size fullSize}) {
+    final r = _lensRadius(s.lensBlur, fullSize);
+    return r > 0 ? r.ceil() + 1 : 0;
+  }
 
   @override
   void clearCache() {}

@@ -66,6 +66,7 @@ flutter:
     - shaders/develop.frag
     - shaders/mask_range.frag
     - shaders/mask_apply.frag
+    - shaders/lens_blur.frag
   assets:
     - assets/layouts/
     - assets/presets/
