@@ -264,4 +264,29 @@ void main() {
     expect(back.masks, p.masks);
     expect(back.lensBlur, p.lensBlur);
   });
+
+  test('brush size clamps to 0.5 to 50 percent of the long edge', () {
+    expect(BrushStroke([], size: 0.0001).size, 0.005);
+    expect(BrushStroke([], size: 3).size, 0.5);
+    expect(BrushStroke.fromJson({'size': 0.0001}).size, 0.005);
+    expect(BrushStroke.fromJson({'size': 3}).size, 0.5);
+  });
+
+  test('an in-memory stroke equals its reloaded copy', () {
+    final s = BrushStroke([(0.123456, 0.654321)]);
+    expect(s.points.first, (0.1235, 0.6543));
+    expect(BrushStroke.fromJson(_rt(s.toJson())), s);
+  });
+
+  test('ids and names are capped', () {
+    final long = 'x' * 100;
+    final m = Mask(id: long, name: long);
+    expect(m.id.length, 64);
+    expect(m.name.length, 40);
+    final back = Mask.fromJson({'id': long, 'name': long});
+    expect(back.id.length, 64);
+    expect(back.name.length, 40);
+    expect(LensBlur(maskId: long).maskId!.length, 64);
+    expect(LensBlur.fromJson({'maskId': long}).maskId!.length, 64);
+  });
 }

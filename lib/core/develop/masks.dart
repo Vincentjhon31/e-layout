@@ -30,6 +30,8 @@ double _c(num v, double lo, double hi) {
   return d.clamp(lo, hi).toDouble();
 }
 
+String _cap(String s, int max) => s.length > max ? s.substring(0, max) : s;
+
 double _r(double v) => (v * 10000).round() / 10000;
 
 double _num(Object? v, double def, double lo, double hi) =>
@@ -57,9 +59,9 @@ class BrushStroke {
     this.erase = false,
   }) : points = List.unmodifiable([
          for (final p in points.take(kMaxPoints))
-           (_c(p.$1, 0, 1), _c(p.$2, 0, 1)),
+           (_r(_c(p.$1, 0, 1)), _r(_c(p.$2, 0, 1))),
        ]),
-       size = _c(size, 0.001, 1),
+       size = _c(size, 0.005, 0.5),
        feather = _c(feather, 0, 100),
        flow = _c(flow, 0, 100);
 
@@ -94,7 +96,7 @@ class BrushStroke {
     }
     return BrushStroke(
       pts,
-      size: _num(json['size'], 0.05, 0.001, 1),
+      size: _num(json['size'], 0.05, 0.005, 0.5),
       feather: _num(json['feather'], 50, 0, 100),
       flow: _num(json['flow'], 100, 0, 100),
       erase: json['erase'] == true,
@@ -392,12 +394,14 @@ class MaskComponent {
 /// A named area with local adjustments.
 class Mask {
   Mask({
-    required this.id,
-    this.name = '',
+    required String id,
+    String name = '',
     Iterable<MaskComponent> components = const [],
     Map<Setting, double> adjust = const {},
     this.visible = true,
-  }) : components = List.unmodifiable(components.take(kMaxComponents)),
+  }) : id = _cap(id, 64),
+       name = _cap(name, 40),
+       components = List.unmodifiable(components.take(kMaxComponents)),
        adjust = Map.unmodifiable({
          for (final e in adjust.entries)
            if (kLocalSettings.contains(e.key)) e.key: e.key.clamp(e.value),
@@ -448,8 +452,8 @@ class Mask {
       }
     }
     return Mask(
-      id: '${json['id'] ?? ''}',
-      name: '${json['name'] ?? ''}',
+      id: _cap('${json['id'] ?? ''}', 64),
+      name: _cap('${json['name'] ?? ''}', 40),
       components: comps,
       adjust: adjust,
       visible: json['visible'] != false,
@@ -487,10 +491,11 @@ class LensBlur {
     this.focus = LensFocus.subject,
     double fx = .5,
     double fy = .5,
-    this.maskId,
+    String? maskId,
     double transition = 50,
     double boost = 0,
-  }) : amount = _c(amount, 0, 100),
+  }) : maskId = maskId == null ? null : _cap(maskId, 64),
+       amount = _c(amount, 0, 100),
        fx = _c(fx, 0, 1),
        fy = _c(fy, 0, 1),
        transition = _c(transition, 0, 100),

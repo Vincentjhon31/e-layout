@@ -701,6 +701,12 @@ void main() {
         findsOneWidget,
         reason: 'the tools are a row at the top of the side panel',
       );
+      for (var i = 0; i < 25; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 300)),
+        );
+        await tester.pump();
+      }
       await expectLater(
         find.byType(PhotoEditorScreen),
         matchesGoldenFile('goldens/photo_editor_wide.png'),
