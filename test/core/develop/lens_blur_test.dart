@@ -160,6 +160,63 @@ void main() {
     });
   });
 
+  testWidgets('a bright spot spreads into a filled disc at a large radius', (
+    t,
+  ) async {
+    await withDev(t, () async {
+      // A 256 px region at the centre of a 4000 px photo: the radius is
+      // 2 % of 4000 = 80 px. Focus on the far corner, so the region is all
+      // out of focus. The spot is 6 px in radius, not one pixel: an 8-bit
+      // prefilter spreads a single pixel below one level.
+      const full = ui.Size(4000, 4000);
+      const origin = ui.Offset(1872, 1872);
+      final src = fillRgba(kSide, kSide, (x, y) {
+        final d = math.sqrt(
+          math.pow(x + 0.5 - 128, 2) + math.pow(y + 0.5 - 128, 2),
+        );
+        return d <= 6 ? (255, 255, 255) : (0, 0, 0);
+      });
+      final s = lensOn(
+        LensBlur(amount: 100, focus: LensFocus.point, fx: 0, fy: 0, boost: 100),
+      );
+      // Luma mean and coefficient of variation inside 0.7 x the radius.
+      Future<(double, double)> disc() async {
+        final out = await run(dev, src, s, origin: origin, fullSize: full);
+        var sum = 0.0, sum2 = 0.0, n = 0;
+        for (var y = 0; y < kSide; y++) {
+          for (var x = 0; x < kSide; x++) {
+            final d = math.sqrt(
+              math.pow(x + 0.5 - 128, 2) + math.pow(y + 0.5 - 128, 2),
+            );
+            if (d > 56) continue;
+            final l = lumaAt(out, kSide, x, y);
+            sum += l;
+            sum2 += l * l;
+            n++;
+          }
+        }
+        final mean = sum / n;
+        return (mean, math.sqrt(math.max(sum2 / n - mean * mean, 0)) / mean);
+      }
+
+      final (mean, cv) = await disc();
+      dev.debugLensPrefilter = false;
+      final (rawMean, rawCv) = await disc();
+      // ignore: avoid_print
+      print(
+        'spot at R 80: prefilter mean $mean cv $cv; '
+        'taps only mean $rawMean cv $rawCv',
+      );
+      expect(
+        mean,
+        greaterThan(rawMean / 2),
+        reason: 'the disc keeps its light',
+      );
+      expect(cv, lessThan(0.35), reason: 'the disc is filled');
+      expect(cv, lessThan(rawCv / 4), reason: 'the taps alone leave dots');
+    });
+  });
+
   testWidgets('two tiles with margin() match one whole render', (t) async {
     await withDev(t, () async {
       final s = lensOn(
@@ -175,8 +232,9 @@ void main() {
         1,
         fullSize: full,
       );
-      // The lens reach: ceil(0.02 x 256) + 2 px.
-      expect(m, clarityOnly + 8);
+      // The lens reach: the radius (2 % of 256 px) plus 3 prefilter sigmas
+      // (0.13 x radius each), rounded up, plus 2 px.
+      expect(m, clarityOnly + (0.02 * 256 * 1.39).ceil() + 2);
       final src = richRgba(4);
       final whole = await run(dev, src, s);
 
@@ -323,8 +381,8 @@ void main() {
         fullSize: full,
       );
       final lensOnly = dev.margin(lensOn(lens), 1, fullSize: full);
-      // 2 % of 8000 px.
-      expect(lensOnly, 160 + 2);
+      // 2 % of 8000 px, plus 3 prefilter sigmas of 0.13 x that.
+      expect(lensOnly, (160 * 1.39).ceil() + 2);
       final all = dev.margin(
         lensOn(lens, values: global, masks: masks),
         1,

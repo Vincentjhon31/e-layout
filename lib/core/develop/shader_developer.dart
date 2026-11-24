@@ -56,8 +56,10 @@ import 'settings.dart';
 //    3           uCap     largest radius allowed (tile budget), px
 //    4           uPower   1 + Transition/50
 //    5           uBoost   Boost/25
-// Samplers: 0 uSrc (the image so far), 1 uFocus (the focus map). Both are
-// drawn images.
+//    6           uPreK    0.128 / prefilter sigma (0 = no prefilter)
+//    7           uMode    0 = the blur, 1 = the prefilter's weighted input
+// Samplers: 0 uSrc (the image so far), 1 uFocus (the focus map), 2 uPre
+// (the weighted prefilter, or uSrc when off). All are drawn images.
 
 /// The blurred copies the shader reads.
 enum _Blur { nrLum, nrCol, sharp, tex, clar }
@@ -245,9 +247,23 @@ class _LensPlan {
 
   bool get isOn => cap > 0 && radius > 0;
 
-  /// The largest radius, rounded up, plus 2 px for the bilinear taps and
-  /// rounding; 0 when off.
-  int get margin => isOn ? cap.ceil() + 2 : 0;
+  /// The prefilter's Gaussian sigma: 0.13 x [cap]. The 48 taps are about
+  /// 0.26 x the radius apart, so at large radii they would leave offset
+  /// copies; reading a copy blurred by half the tap spacing fills the disc.
+  double get preSigma => 0.13 * cap;
+
+  /// The reach per unit of [cap]: the radius plus 3 prefilter sigmas.
+  static const double reachPerPx = 1 + 3 * 0.13;
+
+  /// The largest radius plus 3 prefilter sigmas, rounded up, plus 2 px for
+  /// the bilinear taps and rounding; 0 when off.
+  int get margin => isOn ? (cap * reachPerPx).ceil() + 2 : 0;
+
+  /// Sets [cap] to the largest radius whose [margin] fits in [room] px.
+  void fit(int room) {
+    // A hair under, so rounding cannot push the ceil past room - 2.
+    cap = math.max(0.0, (room - 2) / reachPerPx - 1e-6);
+  }
 }
 
 /// The main pass's plan, the plan of each mask with an effect, in order, and
@@ -272,10 +288,7 @@ class _LensPlan {
 }) {
   final main = _Plan(s, scale, full);
   final lens = _LensPlan(s.lensBlur, full);
-  if (main.margin + lens.margin > cap) {
-    // ceil(cap) + 2 must fit in the room left.
-    lens.cap = math.max(0, cap - main.margin - 2).toDouble();
-  }
+  if (main.margin + lens.margin > cap) lens.fit(cap - main.margin);
   final maskCap = cap - lens.margin;
   final masks = [
     for (final m in s.masks)
@@ -387,6 +400,10 @@ class ShaderDeveloper implements PhotoDeveloper {
   // focus does not push out a mask's coverage on every render.
   final List<_Coverage> _coverages = [];
   static const int _maxCoverages = kMaxMasks + 1;
+
+  /// False turns the lens blur's prefilter off, for tests.
+  @visibleForTesting
+  bool debugLensPrefilter = true;
 
   /// How many point focus maps this developer has drawn, for tests.
   @visibleForTesting
@@ -755,7 +772,6 @@ class ShaderDeveloper implements PhotoDeveloper {
           src.height,
           full.width,
           full.height,
-          scale,
         ]);
         return _cached(key, null, null, () async {
           final img = await _pointFocus(l, src.width, src.height, origin, full);
@@ -822,10 +838,51 @@ class ShaderDeveloper implements PhotoDeveloper {
   }
 
   /// lens_blur.frag over [cur] (the image so far) with [focus], a new image.
+  ///
+  /// The taps read a mix of [cur] and a prefilter: a Gaussian blur, sigma
+  /// [_LensPlan.preSigma], of [cur] premultiplied by each pixel's weight (how
+  /// far out of focus it is, times its Boost weight), made by the same
+  /// shader in its weight mode. The shader divides, so the subject does not
+  /// bleed back into the blur and boosted highlights keep their weight.
+  /// Small radii read mostly [cur] and stay crisp.
   Future<ui.Image> _lensPass(
     ui.Image cur,
     ui.Image focus,
     _LensPlan plan,
+  ) async {
+    final sigma = plan.preSigma;
+    ui.Image? pre;
+    try {
+      if (debugLensPrefilter && sigma >= 0.5) {
+        final weighted = await _lensShade(cur, focus, cur, plan, 0, 1);
+        try {
+          // The existing blur path, uncached: [cur] is new on every call.
+          pre = await blurImage(weighted, sigma);
+        } finally {
+          weighted.dispose();
+        }
+      }
+      return await _lensShade(
+        cur,
+        focus,
+        pre ?? cur,
+        plan,
+        pre == null ? 0 : 0.128 / sigma,
+        0,
+      );
+    } finally {
+      pre?.dispose();
+    }
+  }
+
+  /// One lens_blur.frag pass in [mode] (0 the blur, 1 the weighted input).
+  Future<ui.Image> _lensShade(
+    ui.Image cur,
+    ui.Image focus,
+    ui.Image pre,
+    _LensPlan plan,
+    double preK,
+    double mode,
   ) async {
     final w = cur.width, h = cur.height;
     final sh = _lensProgram.fragmentShader();
@@ -838,10 +895,13 @@ class ShaderDeveloper implements PhotoDeveloper {
       f(plan.cap);
       f(plan.power);
       f(plan.boost);
+      f(preK);
+      f(mode);
       // Taps fall between texels: bilinear. Reads at texel centres stay
       // exact, so in-focus pixels are unchanged.
       sh.setImageSampler(0, cur, filterQuality: ui.FilterQuality.low);
       sh.setImageSampler(1, focus, filterQuality: ui.FilterQuality.low);
+      sh.setImageSampler(2, pre, filterQuality: ui.FilterQuality.low);
       return await recordImage(
         w,
         h,

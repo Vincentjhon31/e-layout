@@ -94,7 +94,7 @@ void main() {
 
   test('lens_blur.frag flips every texture read on OpenGL ES', () {
     final src = File('shaders/lens_blur.frag').readAsStringSync();
-    // Both inputs (the image so far and the focus map) are drawn images,
+    // All inputs (the image so far, the focus map, the prefilter) are drawn,
     // read at many positions through one helper that flips on GLES.
     final helper = RegExp(
       r'vec2\s+uvOf\(vec2\s+p\)\s*\{\s*vec2\s+uv\s*=\s*p\s*/\s*uSize\s*;\s*'
@@ -103,7 +103,7 @@ void main() {
     );
     expect(helper.hasMatch(src), isTrue, reason: 'GLES flip helper missing');
     final reads = RegExp(r'texture\(\s*(\w+)\s*,\s*([^)]*)').allMatches(src);
-    expect(reads.map((m) => m.group(1)).toSet(), {'uSrc', 'uFocus'});
+    expect(reads.map((m) => m.group(1)).toSet(), {'uSrc', 'uFocus', 'uPre'});
     for (final m in reads) {
       expect(
         m.group(2)!.trim(),
