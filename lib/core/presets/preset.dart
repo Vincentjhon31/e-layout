@@ -1,8 +1,9 @@
 import '../develop/profile_table.dart';
 import '../develop/settings.dart';
 
-/// Where a preset came from.
-enum PresetKind { user, imported }
+/// Where a preset came from: shipped with the app, made by the person, or
+/// read from a file.
+enum PresetKind { builtin, user, imported }
 
 /// A named set of adjustments that can be applied to a photo.
 class Preset {

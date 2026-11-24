@@ -80,6 +80,7 @@ class _PresetsPanelState extends State<PresetsPanel> {
       listenable: c,
       builder: (context, _) {
         final presets = c.home.presets;
+        final builtin = c.home.builtinPresets;
         final mine = presets.where((p) => p.kind == PresetKind.user);
         final imported = presets.where((p) => p.kind == PresetKind.imported);
         final thumbs = _thumbsOf(c.photo.id);
@@ -93,22 +94,40 @@ class _PresetsPanelState extends State<PresetsPanel> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final p in [...mine, ...imported])
-                    _Card(
-                      key: ValueKey('preset-${p.id}'),
-                      label: p.name,
-                      onPressed: () => _apply(p),
-                      thumb: _Thumb(future: thumbs.of(p)),
+                  if (builtin.isNotEmpty)
+                    _Group(
+                      title: 'Built-in',
+                      children: [
+                        for (final p in builtin)
+                          _Card(
+                            key: ValueKey('preset-${p.id}'),
+                            label: p.name,
+                            onPressed: () => _apply(p),
+                            thumb: _Thumb(future: thumbs.of(p)),
+                          ),
+                      ],
                     ),
-                  _Card(
-                    key: const ValueKey('preset-import'),
-                    label: 'Import',
-                    onPressed: _importing ? null : _import,
-                    thumb: Icon(
-                      CupertinoIcons.square_arrow_down,
-                      size: 26,
-                      color: colors.accent,
-                    ),
+                  _Group(
+                    title: 'Your presets',
+                    children: [
+                      for (final p in [...mine, ...imported])
+                        _Card(
+                          key: ValueKey('preset-${p.id}'),
+                          label: p.name,
+                          onPressed: () => _apply(p),
+                          thumb: _Thumb(future: thumbs.of(p)),
+                        ),
+                      _Card(
+                        key: const ValueKey('preset-import'),
+                        label: 'Import',
+                        onPressed: _importing ? null : _import,
+                        thumb: Icon(
+                          CupertinoIcons.square_arrow_down,
+                          size: 26,
+                          color: colors.accent,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -117,7 +136,7 @@ class _PresetsPanelState extends State<PresetsPanel> {
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Text(
-                  'No presets yet.',
+                  'No presets of your own yet.',
                   textAlign: TextAlign.start,
                   style: AppText.subhead.copyWith(color: colors.secondary),
                 ),
@@ -125,6 +144,35 @@ class _PresetsPanelState extends State<PresetsPanel> {
           ],
         );
       },
+    );
+  }
+}
+
+/// A captioned run of cards.
+class _Group extends StatelessWidget {
+  const _Group({required this.title, required this.children});
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(right: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 6),
+            child: Text(
+              title,
+              style: AppText.caption.copyWith(color: colors.secondary),
+            ),
+          ),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+        ],
+      ),
     );
   }
 }

@@ -17,6 +17,7 @@ import '../../core/model/layout_codec.dart';
 import '../../core/model/layout_doc.dart';
 import '../../core/model/layout_ops.dart';
 import '../../core/render/layout_prep.dart';
+import '../../core/presets/builtin_presets.dart';
 import '../../core/presets/preset.dart';
 import '../../core/presets/preset_codec.dart';
 import '../../core/presets/preset_import.dart';
@@ -199,6 +200,10 @@ class HomeController extends ChangeNotifier {
 
   List<Preset> presets = [];
 
+  /// The looks shipped with the app. Kept apart from [presets]: never stored,
+  /// never removed.
+  List<Preset> builtinPresets = const [];
+
   /// Colour profiles by id.
   Map<String, Profile> profiles = {};
 
@@ -301,6 +306,11 @@ class HomeController extends ChangeNotifier {
   }
 
   Future<void> _loadPresets() async {
+    try {
+      builtinPresets = await loadBuiltinPresets();
+    } catch (e) {
+      debugPrint('Built-in presets are unavailable: $e');
+    }
     try {
       presets = await presetStore.loadPresets();
     } catch (e) {
@@ -855,7 +865,17 @@ class HomeController extends ChangeNotifier {
     return p;
   }
 
+  /// The built-in or kept preset with [id], or null.
+  Preset? presetById(String id) {
+    for (final p in [...builtinPresets, ...presets]) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  /// Deletes a preset of the person's own. A built-in look stays.
   Future<void> removePreset(Preset p) async {
+    if (p.kind == PresetKind.builtin) return;
     presets.removeWhere((e) => e.id == p.id);
     if (look.sharedId == p.id) {
       look = look.withoutPresetName();

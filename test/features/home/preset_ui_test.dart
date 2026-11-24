@@ -78,14 +78,25 @@ Future<void> pumpHome(
 }
 
 /// Waits (real time) for picker thumbnails, then draws them.
-Future<void> settleThumbs(WidgetTester tester) async {
-  for (var i = 0; i < 8; i++) {
+Future<void> settleThumbs(WidgetTester tester, {int rounds = 8}) async {
+  for (var i = 0; i < rounds; i++) {
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 150)),
     );
     await tester.pump();
   }
 }
+
+/// Scrolls the picker's list until [f] is on screen (rows are built lazily,
+/// and the 16 built-in rows come first).
+Future<void> reveal(WidgetTester tester, Finder f) => tester.dragUntilVisible(
+  f,
+  find.descendant(
+    of: find.byType(PresetPicker),
+    matching: find.byType(Scrollable),
+  ),
+  const Offset(0, -300),
+);
 
 Future<void> openPicker(WidgetTester tester) async {
   await tester.tap(find.text('Preset'));
@@ -150,16 +161,74 @@ void main() {
 
   ptest('choosing in the picker sets the shared preset', (tester) async {
     final c = await ready(tester);
-    await tester.runAsync(() => addPreset(c, 'Warm', 0.3));
+    await tester.runAsync(() => addPreset(c, 'Brisk', 0.3));
     await pumpHome(tester, c);
     await openPicker(tester);
     expect(find.text('Presets'), findsOneWidget);
+    await reveal(tester, find.text('Brisk'));
     expect(find.text('YOUR PRESETS'), findsOneWidget);
-    await tester.tap(find.text('Warm'));
+    await tester.tap(find.text('Brisk'));
     await tester.pumpAndSettle();
-    expect(c.look.sharedName, 'Warm');
+    expect(c.look.sharedName, 'Brisk');
     expect(find.text('Presets'), findsNothing);
   });
+
+  ptest('the picker shows Built-in first, then your presets', (tester) async {
+    final c = await ready(tester);
+    await tester.runAsync(() => addPreset(c, 'Brisk', 0.3));
+    await pumpHome(tester, c);
+    await openPicker(tester);
+    expect(find.text('BUILT-IN'), findsOneWidget);
+    expect(find.text('Warm'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('BUILT-IN')).dy,
+      lessThan(tester.getTopLeft(find.text('Warm')).dy),
+    );
+    // Your presets come after all 16 built-in rows, so they are further down.
+    await reveal(tester, find.text('Brisk'));
+    expect(find.text('YOUR PRESETS'), findsOneWidget);
+  });
+
+  ptest('choosing a built-in look sets the shared preset', (tester) async {
+    final c = await ready(tester);
+    await pumpHome(tester, c);
+    await openPicker(tester);
+    await tester.tap(find.text('Warm'));
+    await tester.pumpAndSettle();
+    expect(c.look.sharedId, 'builtin:warm');
+    expect(c.look.sharedName, 'Warm');
+    expect(c.look.shared.values[Setting.temperature], greaterThan(0));
+  });
+
+  ptest('a built-in look offers Share but no Delete', (tester) async {
+    final c = await ready(tester);
+    await pumpHome(tester, c);
+    await openPicker(tester);
+    await tester.longPress(find.text('Warm'));
+    await tester.pumpAndSettle();
+    expect(find.text('Share'), findsOneWidget);
+    expect(find.text('Delete'), findsNothing);
+  });
+
+  test(
+    'built-in looks load first, cannot be removed, and are found by id',
+    () async {
+      final c = newController();
+      await c.init();
+      expect(c.builtinPresets.length, 16);
+      expect(c.presets, isEmpty);
+      final warm = c.presetById('builtin:warm')!;
+      expect(warm.name, 'Warm');
+      expect(warm.kind, PresetKind.builtin);
+      await c.removePreset(warm);
+      expect(c.builtinPresets.length, 16);
+      expect(c.presetById('builtin:warm'), isNotNull);
+      final mine = await addPreset(c, 'Mine', 0.2);
+      expect(c.presetById(mine.id)!.name, 'Mine');
+      expect(c.presetById('nothing'), isNull);
+      c.dispose();
+    },
+  );
 
   ptest('the picker shows the empty note and the import button', (
     tester,
@@ -167,24 +236,26 @@ void main() {
     final c = await ready(tester);
     await pumpHome(tester, c);
     await openPicker(tester);
+    expect(find.byKey(const Key('preset-check-none')), findsOneWidget);
+    await reveal(tester, find.text('Import a Lightroom preset'));
     expect(
       find.text(
-        'No presets yet. Import a Lightroom preset, or make one in the photo editor with Save as preset.',
+        'No presets of your own yet. Import a Lightroom preset, or make one in the photo editor with Save as preset.',
       ),
       findsOneWidget,
     );
     expect(find.text('Import a Lightroom preset'), findsOneWidget);
-    expect(find.byKey(const Key('preset-check-none')), findsOneWidget);
   });
 
   ptest('long-press opens Share and Delete, and Delete removes the preset', (
     tester,
   ) async {
     final c = await ready(tester);
-    await tester.runAsync(() => addPreset(c, 'Warm', 0.3));
+    await tester.runAsync(() => addPreset(c, 'Brisk', 0.3));
     await pumpHome(tester, c);
     await openPicker(tester);
-    await tester.longPress(find.text('Warm'));
+    await reveal(tester, find.text('Brisk'));
+    await tester.longPress(find.text('Brisk'));
     await tester.pumpAndSettle();
     expect(find.text('Share'), findsOneWidget);
     expect(find.text('Delete'), findsOneWidget);
@@ -201,6 +272,7 @@ void main() {
     expect(c.look.sharedId, a.id);
     await pumpHome(tester, c);
     await openPicker(tester);
+    await reveal(tester, find.byKey(Key('preset-check-${a.id}')));
     expect(find.byKey(Key('preset-check-${a.id}')), findsOneWidget);
     expect(find.byIcon(CupertinoIcons.checkmark), findsOneWidget);
   });
@@ -209,7 +281,7 @@ void main() {
     tester,
   ) async {
     final c = await ready(tester);
-    final a = (await tester.runAsync(() => addPreset(c, 'Warm', 0.3)))!;
+    final a = (await tester.runAsync(() => addPreset(c, 'Brisk', 0.3)))!;
     await tester.runAsync(() => c.choosePresetForAll(a));
     await tester.runAsync(() => c.removePreset(a));
     expect(c.look.sharedId, isNull);
@@ -226,6 +298,7 @@ void main() {
     ];
     await pumpHome(tester, c);
     await openPicker(tester);
+    await reveal(tester, find.text('Import a Lightroom preset'));
     await tester.tap(find.text('Import a Lightroom preset'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
@@ -334,8 +407,9 @@ void main() {
     WidgetTester tester,
     HomeController c,
     Brightness b,
-    String name,
-  ) async {
+    String name, {
+    bool scrollToEnd = false,
+  }) async {
     setView(tester, const Size(390, 844), 2);
     await tester.pumpWidget(
       themed(
@@ -354,7 +428,11 @@ void main() {
     );
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
-    await settleThumbs(tester);
+    if (scrollToEnd) {
+      await reveal(tester, find.text('Import a Lightroom preset'));
+      await tester.pumpAndSettle();
+    }
+    await settleThumbs(tester, rounds: scrollToEnd ? 100 : 30);
     await expectLater(
       find.byType(CupertinoApp),
       matchesGoldenFile('goldens/$name.png'),
@@ -364,14 +442,33 @@ void main() {
   ptest('golden picker light', (tester) async {
     final c = await ready(tester, withPhotos: true);
     await tester.runAsync(() async {
-      await addPreset(c, 'Warm', 0.4);
-      await addPreset(c, 'Moody', -0.5);
+      await addPreset(c, 'Brisk', 0.4);
+      await addPreset(c, 'Mellow', -0.5);
+      await c.importPresets([
+        picked('Soft.xmp', Uint8List.fromList(utf8.encode(presetXmp()))),
+      ]);
+      await c.choosePresetForAll(c.builtinPresets[2]);
+    });
+    await shootPicker(tester, c, Brightness.light, 'preset_picker_light');
+  });
+
+  ptest('golden picker scrolled to your presets', (tester) async {
+    final c = await ready(tester, withPhotos: true);
+    await tester.runAsync(() async {
+      await addPreset(c, 'Brisk', 0.4);
+      await addPreset(c, 'Mellow', -0.5);
       await c.importPresets([
         picked('Soft.xmp', Uint8List.fromList(utf8.encode(presetXmp()))),
       ]);
       await c.choosePresetForAll(c.presets.first);
     });
-    await shootPicker(tester, c, Brightness.light, 'preset_picker_light');
+    await shootPicker(
+      tester,
+      c,
+      Brightness.light,
+      'preset_picker_scrolled_light',
+      scrollToEnd: true,
+    );
   });
 
   ptest('golden picker empty dark', (tester) async {

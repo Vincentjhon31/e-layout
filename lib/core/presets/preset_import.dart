@@ -356,10 +356,14 @@ ImportResult importPresetFiles(
 
   // A share file's preset keeps its own id, so importing it again replaces it.
   for (final (sp, _) in budget.shared) {
-    if (!seen.add(_key(sp.id))) continue;
+    // A shared built-in look must not take the built-in's id.
+    final id = sp.id.startsWith('builtin:')
+        ? 'shared:${sp.id.substring(8)}'
+        : sp.id;
+    if (!seen.add(_key(id))) continue;
     presets.add(
       Preset(
-        id: sp.id,
+        id: id,
         name: sp.name,
         kind: PresetKind.imported,
         created: now,

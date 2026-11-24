@@ -65,13 +65,13 @@ void main() {
   group('presets panel', () {
     etest('with no presets it shows Import and a caption', (tester) async {
       await open(tester);
-      expect(find.text('No presets yet.'), findsOneWidget);
+      expect(find.text('No presets of your own yet.'), findsOneWidget);
       expect(find.text('Import'), findsOneWidget);
     });
 
     etest('cards: yours, then imported, then Import', (tester) async {
       final e = await open(tester, panel: false);
-      await addPreset(tester, e.home, 'Warm');
+      await addPreset(tester, e.home, 'Brisk');
       await tester.runAsync(
         () => e.home.importPresets([
           picked('Soft.xmp', Uint8List.fromList(utf8.encode(presetXmp()))),
@@ -80,27 +80,58 @@ void main() {
       e.setPanel(ToolPanel.presets);
       await tester.pump();
       await settle(tester);
-      expect(find.text('No presets yet.'), findsNothing);
+      expect(find.text('No presets of your own yet.'), findsNothing);
       double x(String t) => tester.getTopLeft(find.text(t)).dx;
-      expect(x('Warm'), lessThan(x('Soft Test')));
+      expect(x('Brisk'), lessThan(x('Soft Test')));
       expect(x('Soft Test'), lessThan(x('Import')));
+    });
+
+    etest('the built-in looks come first under a Built-in caption', (
+      tester,
+    ) async {
+      await open(tester);
+      expect(find.text('Built-in'), findsOneWidget);
+      expect(find.text('Your presets'), findsOneWidget);
+      double x(String t) => tester.getTopLeft(find.text(t)).dx;
+      expect(x('Built-in'), lessThanOrEqualTo(x('Warm')));
+      expect(x('Warm'), lessThan(x('Cool')));
+      expect(x('Sepia'), lessThan(x('Your presets')));
+      expect(x('Your presets'), lessThan(x('Import')));
+    });
+
+    etest('a built-in card applies its look to this photo only', (
+      tester,
+    ) async {
+      final e = await open(tester);
+      final [a, b, _] = e.home.readyPhotos;
+      await tester.tap(find.text('Warm'));
+      await tester.pump();
+      await waitFor(
+        tester,
+        () => e.home.settingsFor(a)[Setting.temperature] > 0,
+      );
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('"Warm" is on this photo.'), findsOneWidget);
+      hideToast();
+      expect(e.home.settingsFor(b)[Setting.temperature], 0);
     });
 
     etest('a card applies to this photo only, with its toast', (tester) async {
       final e = await open(tester, panel: false);
-      await addPreset(tester, e.home, 'Warm');
+      await addPreset(tester, e.home, 'Brisk');
       e.setPanel(ToolPanel.presets);
       await tester.pump();
       await settle(tester);
       final [a, b, _] = e.home.readyPhotos;
-      await tester.tap(find.text('Warm'));
+      await tester.ensureVisible(find.text('Brisk'));
+      await tester.tap(find.text('Brisk'));
       await tester.pump();
       await waitFor(
         tester,
         () => e.home.settingsFor(a)[Setting.exposure] == 0.8,
       );
       await tester.pump(const Duration(seconds: 1));
-      expect(find.text('"Warm" is on this photo.'), findsOneWidget);
+      expect(find.text('"Brisk" is on this photo.'), findsOneWidget);
       hideToast();
       expect(e.home.settingsFor(b)[Setting.exposure], 0);
       expect(e.home.hasOwnChanges(a), isTrue);
@@ -117,6 +148,7 @@ void main() {
       (e.home.picker as FakePhotoPicker).nextFiles = [
         picked('Soft.xmp', Uint8List.fromList(utf8.encode(presetXmp()))),
       ];
+      await tester.ensureVisible(find.text('Import'));
       await tester.tap(find.text('Import'));
       await tester.pump();
       await waitFor(tester, () => e.home.presets.isNotEmpty);
@@ -128,6 +160,7 @@ void main() {
 
     etest('Import cancelled shows nothing', (tester) async {
       await open(tester);
+      await tester.ensureVisible(find.text('Import'));
       await tester.tap(find.text('Import'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
@@ -353,30 +386,43 @@ void main() {
       });
     }
 
-    etest('presets panel', (tester) async {
-      final e = await open(tester, panel: false);
-      for (final n in ['Warm', 'Cool fade', 'Soft']) {
-        await addPreset(tester, e.home, n);
-      }
-      await tester.runAsync(
-        () => e.home.importPresets([
-          picked('Soft.xmp', Uint8List.fromList(utf8.encode(presetXmp()))),
-        ]),
-      );
-      e.setPanel(ToolPanel.presets);
-      await tester.pump();
-      await settle(tester);
-      for (var i = 0; i < 10; i++) {
+    for (final end in [false, true]) {
+      etest('presets panel${end ? ' your presets' : ''}', (tester) async {
+        final e = await open(tester, panel: false);
+        for (final n in ['Brisk', 'Cool fade', 'Soft glow']) {
+          await addPreset(tester, e.home, n);
+        }
         await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 300)),
+          () => e.home.importPresets([
+            picked('Soft.xmp', Uint8List.fromList(utf8.encode(presetXmp()))),
+          ]),
         );
+        e.setPanel(ToolPanel.presets);
         await tester.pump();
-      }
-      await expectLater(
-        find.byType(PresetsPanel),
-        matchesGoldenFile('goldens/presets_panel.png'),
-      );
-    });
+        await settle(tester);
+        if (end) {
+          Scrollable.ensureVisible(
+            tester.element(find.text('Your presets')),
+            alignment: 0,
+          );
+          await tester.pump();
+        }
+        for (var i = 0; i < (end ? 70 : 25); i++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 300)),
+          );
+          await tester.pump();
+        }
+        await expectLater(
+          find.byType(PresetsPanel),
+          matchesGoldenFile(
+            end
+                ? 'goldens/presets_panel_yours.png'
+                : 'goldens/presets_panel.png',
+          ),
+        );
+      });
+    }
 
     for (final b in Brightness.values) {
       final tag = b == Brightness.dark ? '_dark' : '';

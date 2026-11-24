@@ -23,7 +23,7 @@ const List<String> kPresetFileTypes = [
   'json',
 ];
 const String kNoPresetsText =
-    'No presets yet. Import a Lightroom preset, or make one in the photo editor with Save as preset.';
+    'No presets of your own yet. Import a Lightroom preset, or make one in the photo editor with Save as preset.';
 
 /// Opens the preset picker as a bottom sheet.
 Future<void> showPresetPicker(
@@ -121,7 +121,8 @@ class PresetThumbs {
   }
 }
 
-/// "Presets": None, the person's own, the imported ones, and an import button.
+/// "Presets": None, the built-in looks, the person's own, the imported ones,
+/// and an import button.
 class PresetPicker extends StatefulWidget {
   const PresetPicker({super.key, required this.controller});
   final HomeController controller;
@@ -179,6 +180,7 @@ class _PresetPickerState extends State<PresetPicker> {
       }
     }
 
+    section('Built-in', c.builtinPresets);
     section('Your presets', mine);
     section('Imported', imported);
     if (c.presets.isEmpty) out.add(const _Note());
@@ -203,11 +205,12 @@ class _PresetPickerState extends State<PresetPicker> {
       title: p.name,
       actions: [
         SheetAction('Share', () => unawaited(c.sharePreset(p))),
-        SheetAction(
-          'Delete',
-          () => unawaited(c.removePreset(p)),
-          destructive: true,
-        ),
+        if (p.kind != PresetKind.builtin)
+          SheetAction(
+            'Delete',
+            () => unawaited(c.removePreset(p)),
+            destructive: true,
+          ),
       ],
     );
   }

@@ -66,6 +66,7 @@ flutter:
     - shaders/develop.frag
   assets:
     - assets/layouts/
+    - assets/presets/
     - assets/img/
     - assets/whats_new.md
     - assets/fonts/licenses/
