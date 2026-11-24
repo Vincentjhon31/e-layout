@@ -570,7 +570,9 @@ class ShaderDeveloper implements PhotoDeveloper {
     try {
       cov = await _coverageFor(m, src, origin, full, scale, auto);
       var air = 1.0;
-      if (plan.dehaze != 0) air = (stats ?? await _measure(cur)).airlight;
+      // Like the main pass, the airlight is the photo's (or this region
+      // source's), never the image so far.
+      if (plan.dehaze != 0) air = (stats ?? await _measure(src)).airlight;
       // Blurs of the image so far: new on every call, so not cached.
       for (final e in plan.sigmas.entries) {
         blurs[e.key] = await blurImage(cur, e.value);
@@ -719,6 +721,10 @@ class ShaderDeveloper implements PhotoDeveloper {
       c.image.dispose();
     }
     _coverages.clear();
+    for (final e in _localLuts) {
+      e.$2.dispose();
+    }
+    _localLuts.clear();
   }
 
   @override
@@ -728,10 +734,6 @@ class ShaderDeveloper implements PhotoDeveloper {
     _lut = null;
     _lutKey = null;
     _lutProfile = null;
-    for (final e in _localLuts) {
-      e.$2.dispose();
-    }
-    _localLuts.clear();
   }
 
   /// Measures [src] itself, on a copy of at most 512 px.

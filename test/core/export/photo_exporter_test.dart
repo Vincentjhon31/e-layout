@@ -9,6 +9,7 @@ import 'package:image/image.dart' as img;
 import 'package:pio_photo_layout/core/codec/jpeg_encoder.dart';
 import 'package:pio_photo_layout/core/codec/png_encoder.dart';
 import 'package:pio_photo_layout/core/develop/mask_raster.dart';
+import 'package:pio_photo_layout/core/develop/masks.dart';
 import 'package:pio_photo_layout/core/develop/photo_developer.dart';
 import 'package:pio_photo_layout/core/develop/profile_table.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
@@ -166,7 +167,7 @@ class RecordingDeveloper extends CpuDeveloper {
       AutoMapsSource? auto}) {
     calls.add((origin, fullSize, scale, stats, src.width, src.height));
     return super.develop(src, s, profile: profile, scale: scale, origin: origin,
-        fullSize: fullSize, lutSize: lutSize, stats: stats);
+        fullSize: fullSize, lutSize: lutSize, stats: stats, auto: auto);
   }
 
   @override
@@ -381,6 +382,50 @@ void main() {
         for (final c in dev.calls) {
           expect(c.$5, lessThanOrEqualTo(2048), reason: 'piece width ${c.$5}');
           expect(c.$6, lessThanOrEqualTo(2048), reason: 'piece height ${c.$6}');
+        }
+      });
+    });
+
+    // A mask's Dehaze reads the whole-photo airlight too: without it each
+    // tile measured its own and the tiles disagreed.
+    testWidgets('a dehaze mask saved in tiles matches a whole render', (tester) async {
+      await tester.runAsync(() async {
+        final dev = await ShaderDeveloper.load();
+        try {
+          final s = EditSettings.resolve([
+            SettingsPatch(values: {
+              Setting.exposure: 0.2
+            }, masks: [
+              Mask(
+                id: 'haze',
+                components: [MaskComponent(RadialShape(rx: 0.6, ry: 0.6))],
+                adjust: {Setting.dehaze: 70},
+              ),
+            ]),
+          ]);
+          expect(s[Setting.dehaze], 0);
+          expect(needsStats(s), isTrue);
+          const png = ExportSettings(format: OutputFormat.png);
+          final photo = photoPng(300, 200);
+          for (final force in [false, true]) {
+            final whole = pngRgba((await PhotoExporter(forcePixelPath: force, developer: dev)
+                    .render(photo, null, null, png, edit: s))
+                .bytes);
+            final tiled = pngRgba((await PhotoExporter(
+                        tileSize: 160, forcePixelPath: force, developer: dev)
+                    .render(photo, null, null, png, edit: s))
+                .bytes);
+            var worst = 0;
+            for (var i = 0; i < whole.length; i++) {
+              if (i % 4 == 3) continue;
+              worst = math.max(worst, (whole[i] - tiled[i]).abs());
+            }
+            // ignore: avoid_print
+            print('dehaze mask tiles, pixel path $force: max diff $worst levels');
+            expect(worst, lessThanOrEqualTo(2), reason: 'pixel path $force');
+          }
+        } finally {
+          dev.dispose();
         }
       });
     });

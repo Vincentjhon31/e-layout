@@ -74,6 +74,13 @@ abstract class PhotoDeveloper {
 EditSettings maskSettings(Mask m) =>
     EditSettings.resolve([SettingsPatch(values: m.adjust)]);
 
+/// True when developing [s] reads the whole-photo [DevelopStats]: global
+/// Dehaze, or Dehaze in a mask that has an effect. Callers that cut tiles
+/// must then measure them once and pass them to every tile.
+bool needsStats(EditSettings s) =>
+    s[Setting.dehaze] != 0 ||
+    s.masks.any((m) => m.hasEffect && (m.adjust[Setting.dehaze] ?? 0) != 0);
+
 /// Global colour only, through [ColorPipeline] per pixel on the CPU, then
 /// each mask's tone and colour deltas mixed in by its coverage
 /// ([MaskRasterizer]). Effects and detail settings, global or in a mask, are

@@ -151,7 +151,7 @@ class PhotoExporter {
       // and whole-photo values measured once on a small copy.
       final fullSize = ui.Size(pw.toDouble(), ph.toDouble());
       final margin = e == null ? 0 : dev!.margin(e, 1, fullSize: fullSize);
-      final stats = e != null && e[Setting.dehaze] != 0
+      final stats = e != null && needsStats(e)
           ? await _measure(src, pixels)
           : null;
       // An edited tile is sent to the developer with its margin on every side,

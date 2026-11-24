@@ -435,4 +435,51 @@ void main() {
       expect(worst, lessThanOrEqualTo(2));
     });
   });
+
+  test('needsStats: global dehaze or a visible mask with dehaze', () {
+    expect(needsStats(withMasks([])), isFalse);
+    expect(needsStats(withMasks([], {Setting.dehaze: 20})), isTrue);
+    expect(
+      needsStats(
+        withMasks([
+          radial({Setting.dehaze: -30}),
+        ]),
+      ),
+      isTrue,
+    );
+    expect(
+      needsStats(
+        withMasks([
+          radial({Setting.dehaze: 30}, visible: false),
+        ]),
+      ),
+      isFalse,
+    );
+    expect(
+      needsStats(
+        withMasks([
+          radial({Setting.clarity: 30}),
+        ]),
+      ),
+      isFalse,
+    );
+  });
+
+  testWidgets('clearCache frees the masks colour tables', (t) async {
+    await withDev(t, () async {
+      final src = await image(richRgba(6));
+      final s = withMasks([
+        radial({Setting.exposure: 0.5}),
+      ]);
+      Future<void> go() async => (await dev.develop(src, s)).dispose();
+      await go();
+      final baked = dev.debugLutsBaked;
+      await go();
+      expect(dev.debugLutsBaked, baked, reason: 'cached');
+      dev.clearCache();
+      await go();
+      expect(dev.debugLutsBaked, baked + 1, reason: 'baked again');
+      src.dispose();
+    });
+  });
 }

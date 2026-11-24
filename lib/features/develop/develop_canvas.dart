@@ -454,9 +454,10 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   String _lookKey(EditSettings s, ProfileTable? profile) =>
       '${s.key}|${profile == null ? '' : identityHashCode(profile)}';
 
-  /// Whole-photo values, measured once per photo, when Dehaze needs them.
+  /// Whole-photo values, measured once per photo, when Dehaze (global or in
+  /// a mask) needs them.
   Future<DevelopStats?> _statsFor(PhotoItem p, EditSettings s) async {
-    if (s[Setting.dehaze] == 0) return null;
+    if (!needsStats(s)) return null;
     final have = _stats;
     if (have != null && have.$1 == p.id) return have.$2;
     final small = p.preview ?? _fit;
