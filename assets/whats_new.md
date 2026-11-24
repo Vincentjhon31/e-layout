@@ -13,6 +13,7 @@ Never mention internal details such as servers, hosting, keys, admin tools or fi
 - Put one preset on every photo, then change single photos when one needs it.
 - Import your Lightroom presets (.xmp, .dng, .lrtemplate), including their profiles, and share your own presets as a file.
 - Your photos and their edits stay in e-Layout until you clear them.
+- The PIO footer has sharper logos: the municipal seal, HEART and Malasakit sa Mamamayan.
 
 ## 1.0.1
 
