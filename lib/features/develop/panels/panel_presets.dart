@@ -13,7 +13,8 @@ const double _kCardWidth = 80;
 const double _kThumb = 72;
 
 /// Presets: a row of cards, each this photo with the preset on it. A tap puts
-/// the preset on this photo only. Last comes the Import card.
+/// the preset on this photo only. The Import card comes first, then your own
+/// and imported presets, then the built-in looks.
 class PresetsPanel extends StatefulWidget {
   const PresetsPanel({super.key, required this.controller});
   final PhotoEditorController controller;
@@ -94,6 +95,34 @@ class _PresetsPanelState extends State<PresetsPanel> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _Group(
+                    title: ' ',
+                    children: [
+                      _Card(
+                        key: const ValueKey('preset-import'),
+                        label: 'Import',
+                        onPressed: _importing ? null : _import,
+                        thumb: Icon(
+                          CupertinoIcons.square_arrow_down,
+                          size: 26,
+                          color: colors.accent,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (presets.isNotEmpty)
+                    _Group(
+                      title: 'Your presets',
+                      children: [
+                        for (final p in [...mine, ...imported])
+                          _Card(
+                            key: ValueKey('preset-${p.id}'),
+                            label: p.name,
+                            onPressed: () => _apply(p),
+                            thumb: _Thumb(future: thumbs.of(p)),
+                          ),
+                      ],
+                    ),
                   if (builtin.isNotEmpty)
                     _Group(
                       title: 'Built-in',
@@ -107,28 +136,6 @@ class _PresetsPanelState extends State<PresetsPanel> {
                           ),
                       ],
                     ),
-                  _Group(
-                    title: 'Your presets',
-                    children: [
-                      for (final p in [...mine, ...imported])
-                        _Card(
-                          key: ValueKey('preset-${p.id}'),
-                          label: p.name,
-                          onPressed: () => _apply(p),
-                          thumb: _Thumb(future: thumbs.of(p)),
-                        ),
-                      _Card(
-                        key: const ValueKey('preset-import'),
-                        label: 'Import',
-                        onPressed: _importing ? null : _import,
-                        thumb: Icon(
-                          CupertinoIcons.square_arrow_down,
-                          size: 26,
-                          color: colors.accent,
-                        ),
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),

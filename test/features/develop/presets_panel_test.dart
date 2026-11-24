@@ -82,21 +82,37 @@ void main() {
       await settle(tester);
       expect(find.text('No presets of your own yet.'), findsNothing);
       double x(String t) => tester.getTopLeft(find.text(t)).dx;
+      expect(x('Import'), lessThan(x('Brisk')));
       expect(x('Brisk'), lessThan(x('Soft Test')));
-      expect(x('Soft Test'), lessThan(x('Import')));
     });
 
-    etest('the built-in looks come first under a Built-in caption', (
+    etest('Import comes first, then your presets, then the built-in looks', (
       tester,
     ) async {
-      await open(tester);
+      final e = await open(tester, panel: false);
+      await addPreset(tester, e.home, 'Brisk');
+      e.setPanel(ToolPanel.presets);
+      await tester.pump();
+      await settle(tester);
       expect(find.text('Built-in'), findsOneWidget);
       expect(find.text('Your presets'), findsOneWidget);
       double x(String t) => tester.getTopLeft(find.text(t)).dx;
+      expect(x('Import'), lessThan(x('Your presets')));
+      expect(x('Your presets'), lessThanOrEqualTo(x('Brisk')));
+      expect(x('Brisk'), lessThan(x('Built-in')));
       expect(x('Built-in'), lessThanOrEqualTo(x('Warm')));
       expect(x('Warm'), lessThan(x('Cool')));
-      expect(x('Sepia'), lessThan(x('Your presets')));
-      expect(x('Your presets'), lessThan(x('Import')));
+      expect(x('Cool'), lessThan(x('Sepia')));
+    });
+
+    etest('with none of your own, Import is followed by the built-ins', (
+      tester,
+    ) async {
+      await open(tester);
+      expect(find.text('Your presets'), findsNothing);
+      double x(String t) => tester.getTopLeft(find.text(t)).dx;
+      expect(x('Import'), lessThan(x('Built-in')));
+      expect(x('Built-in'), lessThanOrEqualTo(x('Warm')));
     });
 
     etest('a built-in card applies its look to this photo only', (

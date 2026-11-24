@@ -44,11 +44,11 @@
    "name": "Soft",
    "patch": {
     "values": {
-     "contrast": -16,
-     "clarity": -18,
-     "shadows": 28,
-     "highlights": -12,
-     "saturation": -4
+     "exposure": 0.1,
+     "contrast": -20,
+     "clarity": -25,
+     "shadows": 30,
+     "highlights": -10
     },
     "curves": {}
    }
@@ -58,27 +58,29 @@
    "name": "Matte",
    "patch": {
     "values": {
-     "blacks": 30,
-     "contrast": -8,
-     "saturation": -8
+     "blacks": 40,
+     "contrast": 6,
+     "saturation": 4,
+     "temperature": 4,
+     "highlights": -8
     },
     "curves": {
      "master": [
       [
        0,
-       16
+       26
       ],
       [
        64,
-       66
+       70
       ],
       [
        192,
-       194
+       192
       ],
       [
        255,
-       246
+       240
       ]
      ]
     }
@@ -89,10 +91,11 @@
    "name": "Fade",
    "patch": {
     "values": {
-     "saturation": -22,
-     "blacks": 30,
+     "saturation": -36,
+     "temperature": -3,
+     "blacks": 12,
      "highlights": -28,
-     "contrast": -8
+     "exposure": 0.05
     },
     "curves": {}
    }
@@ -138,11 +141,15 @@
    "name": "Vintage",
    "patch": {
     "values": {
-     "temperature": 22,
-     "tint": 4,
-     "saturation": -20,
+     "temperature": 26,
+     "tint": 8,
+     "saturation": -14,
      "blacks": 26,
-     "contrast": -8,
+     "contrast": -6,
+     "hueGreen": -20,
+     "satGreen": -18,
+     "gradeHighHue": 45,
+     "gradeHighSat": 20,
      "grainAmount": 30,
      "grainSize": 30,
      "vignetteAmount": -28,
@@ -260,7 +267,8 @@
    "name": "B&W contrast",
    "patch": {
     "values": {
-     "contrast": 62,
+     "exposure": -0.15,
+     "contrast": 70,
      "clarity": 30,
      "blacks": -30,
      "whites": 15,
@@ -271,7 +279,26 @@
      "grayBlue": -60,
      "grayAqua": -35
     },
-    "curves": {},
+    "curves": {
+     "master": [
+      [
+       0,
+       0
+      ],
+      [
+       64,
+       42
+      ],
+      [
+       192,
+       216
+      ],
+      [
+       255,
+       255
+      ]
+     ]
+    },
     "grayscale": true
    }
   },

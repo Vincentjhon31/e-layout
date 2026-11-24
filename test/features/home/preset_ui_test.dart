@@ -173,20 +173,48 @@ void main() {
     expect(find.text('Presets'), findsNothing);
   });
 
-  ptest('the picker shows Built-in first, then your presets', (tester) async {
+  ptest('with none of your own the picker shows Built-in first', (
+    tester,
+  ) async {
     final c = await ready(tester);
-    await tester.runAsync(() => addPreset(c, 'Brisk', 0.3));
     await pumpHome(tester, c);
     await openPicker(tester);
     expect(find.text('BUILT-IN'), findsOneWidget);
-    expect(find.text('Warm'), findsOneWidget);
+    expect(find.text('YOUR PRESETS'), findsNothing);
     expect(
       tester.getTopLeft(find.text('BUILT-IN')).dy,
       lessThan(tester.getTopLeft(find.text('Warm')).dy),
     );
-    // Your presets come after all 16 built-in rows, so they are further down.
-    await reveal(tester, find.text('Brisk'));
+    // The Import button is pinned below the list, so it is on screen.
+    expect(find.text('Import a Lightroom preset'), findsOneWidget);
+  });
+
+  ptest('your presets come before Built-in, and Import stays in reach', (
+    tester,
+  ) async {
+    final c = await ready(tester);
+    await tester.runAsync(() => addPreset(c, 'Brisk', 0.3));
+    await pumpHome(tester, c);
+    await openPicker(tester);
     expect(find.text('YOUR PRESETS'), findsOneWidget);
+    expect(find.text('Brisk'), findsOneWidget);
+    expect(find.text('Import a Lightroom preset'), findsOneWidget);
+    await reveal(tester, find.text('BUILT-IN'));
+    expect(find.text('BUILT-IN'), findsOneWidget);
+    expect(find.text('Import a Lightroom preset'), findsOneWidget);
+    // Built-in rows are after your own: scroll back up to compare.
+    await tester.drag(
+      find.descendant(
+        of: find.byType(PresetPicker),
+        matching: find.byType(Scrollable),
+      ),
+      const Offset(0, 2000),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.text('YOUR PRESETS')).dy,
+      lessThan(tester.getTopLeft(find.text('BUILT-IN')).dy),
+    );
   });
 
   ptest('choosing a built-in look sets the shared preset', (tester) async {

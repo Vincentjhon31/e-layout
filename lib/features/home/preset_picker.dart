@@ -146,14 +146,6 @@ class _Row extends _Item {
   final bool first, last;
 }
 
-class _Note extends _Item {
-  const _Note();
-}
-
-class _ImportButton extends _Item {
-  const _ImportButton();
-}
-
 class _PresetPickerState extends State<PresetPicker> {
   late final PresetThumbs _thumbs = PresetThumbs(widget.controller);
   bool _importing = false;
@@ -180,11 +172,11 @@ class _PresetPickerState extends State<PresetPicker> {
       }
     }
 
-    section('Built-in', c.builtinPresets);
+    // The person's own presets come first once there are any.
+    if (c.presets.isEmpty) section('Built-in', c.builtinPresets);
     section('Your presets', mine);
     section('Imported', imported);
-    if (c.presets.isEmpty) out.add(const _Note());
-    out.add(const _ImportButton());
+    if (c.presets.isNotEmpty) section('Built-in', c.builtinPresets);
     return out;
   }
 
@@ -238,88 +230,101 @@ class _PresetPickerState extends State<PresetPicker> {
         return SheetScaffold(
           title: 'Presets',
           scrollable: false,
-          child: SizedBox(
-            height: math.min(
-              _height(items),
-              MediaQuery.sizeOf(context).height * 0.9 - 80,
-            ),
-            child: ListView.builder(
-              padding: EdgeInsets.zero,
-              itemCount: items.length,
-              itemBuilder: (context, i) {
-                final item = items[i];
-                switch (item) {
-                  case _Header(:final title):
-                    return Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
-                      child: Text(
-                        title.toUpperCase(),
-                        style: AppText.section.copyWith(
-                          color: colors.secondary,
-                        ),
-                      ),
-                    );
-                  case _Row(:final preset, :final first, :final last):
-                    final row = _PresetRowTile(
-                      key: ValueKey(preset?.id ?? 'none'),
-                      preset: preset,
-                      thumbs: _thumbs,
-                      current: _isCurrent(preset),
-                      first: first,
-                      last: last,
-                      onTap: () => _choose(preset),
-                      onActions: preset == null ? null : () => _actions(preset),
-                    );
-                    return preset == null
-                        ? row
-                        : Dismissible(
-                            key: ValueKey('swipe-${preset.id}'),
-                            direction: DismissDirection.endToStart,
-                            confirmDismiss: (_) async {
-                              _actions(preset);
-                              return false;
-                            },
-                            background: const SizedBox.shrink(),
-                            secondaryBackground: Align(
-                              alignment: Alignment.centerRight,
-                              child: Padding(
-                                padding: const EdgeInsets.only(right: 20),
-                                child: Icon(
-                                  CupertinoIcons.ellipsis,
-                                  color: colors.secondary,
-                                ),
-                              ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                height: math.max(
+                  0,
+                  math.min(
+                    _height(items),
+                    MediaQuery.sizeOf(context).height * 0.9 -
+                        80 -
+                        _footerHeight,
+                  ),
+                ),
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  itemCount: items.length,
+                  itemBuilder: (context, i) {
+                    final item = items[i];
+                    switch (item) {
+                      case _Header(:final title):
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 20, 16, 6),
+                          child: Text(
+                            title.toUpperCase(),
+                            style: AppText.section.copyWith(
+                              color: colors.secondary,
                             ),
-                            child: row,
-                          );
-                  case _Note():
-                    return Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-                      child: Text(
-                        kNoPresetsText,
-                        textAlign: TextAlign.center,
-                        style: AppText.subhead.copyWith(
-                          color: colors.secondary,
-                        ),
-                      ),
-                    );
-                  case _ImportButton():
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 20),
-                      child: AppButton.tinted(
-                        label: 'Import a Lightroom preset',
-                        icon: CupertinoIcons.square_arrow_down,
-                        onPressed: _importing ? null : _import,
-                      ),
-                    );
-                }
-              },
-            ),
+                          ),
+                        );
+                      case _Row(:final preset, :final first, :final last):
+                        final row = _PresetRowTile(
+                          key: ValueKey(preset?.id ?? 'none'),
+                          preset: preset,
+                          thumbs: _thumbs,
+                          current: _isCurrent(preset),
+                          first: first,
+                          last: last,
+                          onTap: () => _choose(preset),
+                          onActions: preset == null
+                              ? null
+                              : () => _actions(preset),
+                        );
+                        return preset == null
+                            ? row
+                            : Dismissible(
+                                key: ValueKey('swipe-${preset.id}'),
+                                direction: DismissDirection.endToStart,
+                                confirmDismiss: (_) async {
+                                  _actions(preset);
+                                  return false;
+                                },
+                                background: const SizedBox.shrink(),
+                                secondaryBackground: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(right: 20),
+                                    child: Icon(
+                                      CupertinoIcons.ellipsis,
+                                      color: colors.secondary,
+                                    ),
+                                  ),
+                                ),
+                                child: row,
+                              );
+                    }
+                  },
+                ),
+              ),
+              // Pinned below the list, so it is always in reach.
+              if (c.presets.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Text(
+                    kNoPresetsText,
+                    textAlign: TextAlign.center,
+                    style: AppText.subhead.copyWith(color: colors.secondary),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: AppButton.tinted(
+                  label: 'Import a Lightroom preset',
+                  icon: CupertinoIcons.square_arrow_down,
+                  onPressed: _importing ? null : _import,
+                ),
+              ),
+            ],
           ),
         );
       },
     );
   }
+
+  double get _footerHeight =>
+      16 + AppMetrics.buttonHeight + (c.presets.isEmpty ? 86 : 0);
 
   // The height the rows need, so the sheet is only as tall as its content.
   double _height(List<_Item> items) {
@@ -328,8 +333,6 @@ class _PresetPickerState extends State<PresetPicker> {
       h += switch (i) {
         _Header() => 46,
         _Row() => kPresetThumb + 16,
-        _Note() => 86,
-        _ImportButton() => 20 + AppMetrics.buttonHeight,
       };
     }
     return h;

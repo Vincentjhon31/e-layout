@@ -2,10 +2,13 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pio_photo_layout/core/develop/color_pipeline.dart';
 import 'package:pio_photo_layout/core/develop/photo_developer.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
 import 'package:pio_photo_layout/core/presets/builtin_presets.dart';
 import 'package:pio_photo_layout/core/presets/preset.dart';
+import 'package:pio_photo_layout/core/presets/preset_codec.dart';
+import 'package:pio_photo_layout/core/presets/preset_import.dart';
 import 'package:pio_photo_layout/core/render/sample_scene.dart';
 
 import '../../ui/golden_helpers.dart';
@@ -90,6 +93,36 @@ void main() {
         expect(pts.length, greaterThanOrEqualTo(2), reason: p.name);
       }
     }
+  });
+
+  test('B&W contrast spreads a grey gradient more than Black & white', () {
+    double spread(String name) {
+      final p = presets.firstWhere((e) => e.name == name);
+      final pipe = ColorPipeline(EditSettings.resolve([p.patch]));
+      final out = [
+        for (var i = 1; i <= 19; i++) pipe.apply(i / 20, i / 20, i / 20).$1,
+      ];
+      final mean = out.reduce((a, b) => a + b) / out.length;
+      return out.map((v) => (v - mean) * (v - mean)).reduce((a, b) => a + b) /
+          out.length;
+    }
+
+    expect(spread('B&W contrast'), greaterThan(spread('Black & white') * 1.1));
+    expect(spread('Black & white'), greaterThan(0));
+  });
+
+  test('a shared built-in look is imported under a shared: id', () {
+    final warm = presets.first;
+    final file = encodePresetFile(warm, null);
+    final r = importPresetFiles([('Warm.preset.json', file)]);
+    expect(r.presets, hasLength(1));
+    expect(r.presets.single.id, 'shared:warm');
+    expect(r.presets.single.kind, PresetKind.imported);
+    expect(r.presets.single.name, 'Warm');
+    expect(
+      r.presets.single.patch.values[Setting.temperature],
+      warm.patch.values[Setting.temperature],
+    );
   });
 
   testWidgets('golden: the 16 looks on the sample scene', (tester) async {
