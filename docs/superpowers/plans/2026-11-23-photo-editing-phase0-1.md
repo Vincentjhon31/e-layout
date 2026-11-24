@@ -40,7 +40,7 @@
 - Shell: `cd` explicitly or use absolute paths, and quote paths (the user folder name has a space). Write files with the Write tool.
 - Git: work on branch `feature/photo-editing`, and commit at the end of every task. End every commit message with these two lines:
   ```
-  Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+  Co-Authored-By: Claude Opus 5.5 (the noreply address Anthropic gives)
   Claude-Session: https://claude.ai/code/session_0173zfBAdymYyN846CJGK4tq
   ```
   Never push. Never touch the Obsidian vault's repository.

@@ -7,6 +7,7 @@ and nothing is sent anywhere but 127.0.0.1.
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -82,9 +83,17 @@ class WhatsNewTest(unittest.TestCase):
             tmp.cleanup()
 
 
+def current_version():
+    """(version, build) from the project's pubspec.yaml."""
+    text = (PROJECT / 'pubspec.yaml').read_text(encoding='utf-8')
+    m = re.search(r'^version: (\d+\.\d+\.\d+)\+(\d+)', text, re.M)
+    return m.group(1), int(m.group(2))
+
+
 class VersionTest(unittest.TestCase):
     def test_matching_tag_passes(self):
-        r = run('check_version.py', 'v1.0.0+1')
+        version, build = current_version()
+        r = run('check_version.py', f'v{version}+{build}')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_wrong_version_names_both_places(self):
@@ -117,13 +126,14 @@ class VersionTest(unittest.TestCase):
     def test_bump_changes_both_places(self):
         tmp, root = project_copy()
         try:
-            r = run('bump_version.py', '1.0.1', root=root)
+            nxt = current_version()[1] + 1
+            r = run('bump_version.py', '9.9.9', root=root)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn('version: 1.0.1+2', (root / 'pubspec.yaml').read_text(encoding='utf-8'))
+            self.assertIn(f'version: 9.9.9+{nxt}', (root / 'pubspec.yaml').read_text(encoding='utf-8'))
             info = (root / 'lib' / 'app_info.dart').read_text(encoding='utf-8')
-            self.assertIn("kAppVersion = '1.0.1';", info)
-            self.assertIn('kAppBuild = 2;', info)
-            r = run('check_version.py', 'v1.0.1+2', root=root)
+            self.assertIn("kAppVersion = '9.9.9';", info)
+            self.assertIn(f'kAppBuild = {nxt};', info)
+            r = run('check_version.py', f'v9.9.9+{nxt}', root=root)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         finally:
             tmp.cleanup()
