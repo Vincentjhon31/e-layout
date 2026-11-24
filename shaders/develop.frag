@@ -166,6 +166,12 @@ float valueNoise(vec2 p) {
 
 void main() {
   vec2 frag = FlutterFragCoord().xy;
+  // Impeller's OpenGL ES backend reverses the y axis (see ImageFilter.shader
+  // in dart:ui). Flip the position itself so sampling, vignette, grain and
+  // tile origins all agree with the other backends.
+#ifdef IMPELLER_TARGET_OPENGLES
+  frag.y = uSize.y - frag.y;
+#endif
   vec2 uv = frag / uSize;
   vec4 s0 = texture(uSrc, uv);
   float alpha = s0.a;
