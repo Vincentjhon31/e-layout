@@ -64,6 +64,7 @@ dev_dependencies:
 flutter:
   shaders:
     - shaders/develop.frag
+    - shaders/mask_range.frag
   assets:
     - assets/layouts/
     - assets/presets/
