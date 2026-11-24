@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pio_photo_layout/core/develop/mask_raster.dart';
 import 'package:pio_photo_layout/core/develop/photo_developer.dart';
 import 'package:pio_photo_layout/core/develop/profile_table.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
@@ -61,6 +62,7 @@ class LutLog extends CpuDeveloper {
     ui.Size? fullSize,
     int lutSize = 33,
     DevelopStats? stats,
+    AutoMapsSource? auto,
   }) {
     luts.add(lutSize);
     return super.develop(
@@ -223,6 +225,7 @@ class TileLog extends CpuDeveloper {
     ui.Size? fullSize,
     int lutSize = 33,
     DevelopStats? stats,
+    AutoMapsSource? auto,
   }) {
     calls.add((
       w: src.width,

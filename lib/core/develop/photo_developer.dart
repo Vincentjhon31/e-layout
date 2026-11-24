@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'color_pipeline.dart';
+import 'mask_raster.dart';
+import 'masks.dart';
 import 'profile_table.dart';
 import 'settings.dart';
 
@@ -34,6 +36,12 @@ abstract class PhotoDeveloper {
   /// - [lutSize]: colour table nodes per side (17 while dragging, 33 after).
   /// - [stats]: whole-photo values from [measureStats]. Tiles must pass them;
   ///   when null and Dehaze is on, [src] itself is measured.
+  /// - [auto]: the photo's automatic maps, for Subject, Sky and Background
+  ///   mask components (which cover nothing without them).
+  ///
+  /// After the global edits, each mask with an effect ([Mask.hasEffect]) is
+  /// applied in order: the image so far is developed with the mask's
+  /// [maskSettings] and mixed back by the mask's coverage.
   Future<ui.Image> develop(
     ui.Image src,
     EditSettings s, {
@@ -43,6 +51,7 @@ abstract class PhotoDeveloper {
     ui.Size? fullSize,
     int lutSize = 33,
     DevelopStats? stats,
+    AutoMapsSource? auto,
   });
 
   /// The tile overlap, in render pixels, so that tiles cut with this much
@@ -59,9 +68,19 @@ abstract class PhotoDeveloper {
   void dispose();
 }
 
-/// Global colour only, through [ColorPipeline] per pixel on the CPU. Effects
-/// and detail settings are ignored. For tests and as a fake in later tasks.
+/// The settings a mask develops its area with: its deltas over neutral
+/// settings. Applied to the image as developed so far, this is a Phase 1
+/// approximation of local adjustments, not an exact match of Lightroom's.
+EditSettings maskSettings(Mask m) =>
+    EditSettings.resolve([SettingsPatch(values: m.adjust)]);
+
+/// Global colour only, through [ColorPipeline] per pixel on the CPU, then
+/// each mask's tone and colour deltas mixed in by its coverage
+/// ([MaskRasterizer]). Effects and detail settings, global or in a mask, are
+/// ignored. For tests and as a fake in later tasks.
 class CpuDeveloper implements PhotoDeveloper {
+  MaskRasterizer? _raster;
+
   @override
   Future<ui.Image> develop(
     ui.Image src,
@@ -72,6 +91,7 @@ class CpuDeveloper implements PhotoDeveloper {
     ui.Size? fullSize,
     int lutSize = 33,
     DevelopStats? stats,
+    AutoMapsSource? auto,
   }) async {
     final px = await readRgba(src);
     final p = ColorPipeline(s, profile: profile);
@@ -81,6 +101,42 @@ class CpuDeveloper implements PhotoDeveloper {
         px[i] = (c.$1 * 255).round();
         px[i + 1] = (c.$2 * 255).round();
         px[i + 2] = (c.$3 * 255).round();
+      }
+    }
+    final full =
+        fullSize ?? ui.Size(src.width.toDouble(), src.height.toDouble());
+    for (final m in s.masks) {
+      if (!m.hasEffect) continue;
+      final local = ColorPipeline(maskSettings(m));
+      if (local.isIdentity) continue;
+      final r = _raster ??= await MaskRasterizer.load();
+      final cov = await r.coverage(
+        m,
+        src: src,
+        origin: origin,
+        fullSize: full,
+        scale: scale,
+        auto: auto,
+      );
+      final Uint8List a;
+      try {
+        a = await readRgba(cov);
+      } finally {
+        cov.dispose();
+      }
+      for (var i = 0; i < px.length; i += 4) {
+        final k = a[i + 3] / 255;
+        if (k == 0) continue;
+        final c = local.apply(px[i] / 255, px[i + 1] / 255, px[i + 2] / 255);
+        px[i] = (px[i] + (c.$1 * 255 - px[i]) * k).round().clamp(0, 255);
+        px[i + 1] = (px[i + 1] + (c.$2 * 255 - px[i + 1]) * k).round().clamp(
+          0,
+          255,
+        );
+        px[i + 2] = (px[i + 2] + (c.$3 * 255 - px[i + 2]) * k).round().clamp(
+          0,
+          255,
+        );
       }
     }
     return imageFromRgba(px, src.width, src.height);

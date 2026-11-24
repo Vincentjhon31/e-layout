@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:pio_photo_layout/core/codec/jpeg_encoder.dart';
 import 'package:pio_photo_layout/core/codec/png_encoder.dart';
+import 'package:pio_photo_layout/core/develop/mask_raster.dart';
 import 'package:pio_photo_layout/core/develop/photo_developer.dart';
 import 'package:pio_photo_layout/core/develop/profile_table.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
@@ -105,7 +106,8 @@ class UnusedDeveloper implements PhotoDeveloper {
       ui.Offset origin = ui.Offset.zero,
       ui.Size? fullSize,
       int lutSize = 33,
-      DevelopStats? stats}) {
+      DevelopStats? stats,
+      AutoMapsSource? auto}) {
     throw TestFailure('the developer was used for neutral edits');
   }
 
@@ -131,7 +133,8 @@ class OutOfMemoryDeveloper implements PhotoDeveloper {
           ui.Offset origin = ui.Offset.zero,
           ui.Size? fullSize,
           int lutSize = 33,
-          DevelopStats? stats}) async =>
+          DevelopStats? stats,
+          AutoMapsSource? auto}) async =>
       throw const OutOfMemoryError();
 
   @override
@@ -156,7 +159,8 @@ class RecordingDeveloper extends CpuDeveloper {
       ui.Offset origin = ui.Offset.zero,
       ui.Size? fullSize,
       int lutSize = 33,
-      DevelopStats? stats}) {
+      DevelopStats? stats,
+      AutoMapsSource? auto}) {
     calls.add((origin, fullSize, scale, stats, src.width, src.height));
     return super.develop(src, s, profile: profile, scale: scale, origin: origin,
         fullSize: fullSize, lutSize: lutSize, stats: stats);

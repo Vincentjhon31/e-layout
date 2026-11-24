@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'color_pipeline.dart';
 import 'lut.dart';
+import 'mask_raster.dart';
+import 'masks.dart';
 import 'photo_developer.dart';
 import 'profile_table.dart';
 import 'settings.dart';
@@ -41,6 +43,11 @@ import 'settings.dart';
 //   28           uGrainRough   Roughness/100
 // Samplers: 0 uSrc, 1 uBlurNrLum, 2 uBlurNrCol, 3 uBlurSharp, 4 uBlurTex,
 // 5 uBlurClar, 6 uLut. An unused blur is bound to the source.
+//
+// Uniform layout of shaders/mask_apply.frag:
+//   float index  name    meaning
+//    0, 1        uSize   output (= base) size, px
+// Samplers: 0 uBase, 1 uLocal, 2 uCov. All three are drawn images.
 
 /// The blurred copies the shader reads.
 enum _Blur { nrLum, nrCol, sharp, tex, clar }
@@ -223,15 +230,42 @@ class _BlurSet {
 
 /// The GPU developer: one fragment shader pass over blurred copies of the
 /// source and a baked colour table (shaders/develop.frag).
+///
+/// Masks follow the main pass, each in order (see [PhotoDeveloper.develop]):
+/// the image so far is developed again through develop.frag with the mask's
+/// [maskSettings] (its own colour table and blurs of that image, so its
+/// texture, clarity and dehaze use the main pass's maths), then
+/// shaders/mask_apply.frag mixes the two by the mask's coverage.
 class ShaderDeveloper implements PhotoDeveloper {
-  ShaderDeveloper._(this._program);
+  ShaderDeveloper._(this._program, this._applyProgram, this._raster);
 
-  static Future<ShaderDeveloper> load() async =>
-      ShaderDeveloper._(await ui.FragmentProgram.fromAsset(_asset));
+  static Future<ShaderDeveloper> load() async => ShaderDeveloper._(
+    await ui.FragmentProgram.fromAsset(_asset),
+    await ui.FragmentProgram.fromAsset(_applyAsset),
+    await MaskRasterizer.load(),
+  );
 
   static const String _asset = 'shaders/develop.frag';
+  static const String _applyAsset = 'shaders/mask_apply.frag';
 
   final ui.FragmentProgram _program;
+  final ui.FragmentProgram _applyProgram;
+  final MaskRasterizer _raster;
+
+  // Mask coverage per (components, region, photo size, scale, and the auto
+  // maps or source they read), the last [_maxCoverages], newest last.
+  final List<_Coverage> _coverages = [];
+  static const int _maxCoverages = 8;
+  // Bumped by clearCache, so a coverage drawn across it is not kept.
+  int _coverageGen = 0;
+
+  /// How many mask coverages this developer has drawn, for tests.
+  @visibleForTesting
+  int debugCoveragesDrawn = 0;
+
+  // Masks' colour tables by key, the last [_maxLocalLuts], newest last.
+  final List<(String, ui.Image)> _localLuts = [];
+  static const int _maxLocalLuts = 8;
 
   // Blurred inputs per (image identity, scale, photo size), the last two
   // entries, newest last. The sharpening blur is also keyed by its sigma.
@@ -246,10 +280,18 @@ class ShaderDeveloper implements PhotoDeveloper {
   String? _lutKey;
   ProfileTable? _lutProfile;
 
+  /// The main pass's blur reach plus each mask's: a mask's pass blurs the
+  /// main pass's output (and the masks before it), so the reaches add.
   @override
   int margin(EditSettings s, double scale, {required ui.Size fullSize}) {
     assert(scale > 0);
-    return _Plan(s, scale, fullSize).margin;
+    var m = _Plan(s, scale, fullSize).margin;
+    for (final mask in s.masks) {
+      if (mask.hasEffect) {
+        m += _Plan(maskSettings(mask), scale, fullSize).margin;
+      }
+    }
+    return m;
   }
 
   @override
@@ -262,11 +304,58 @@ class ShaderDeveloper implements PhotoDeveloper {
     ui.Size? fullSize,
     int lutSize = 33,
     DevelopStats? stats,
+    AutoMapsSource? auto,
   }) async {
     assert(scale > 0);
     assert(lutSize >= 2);
-    final w = src.width, h = src.height;
-    final full = fullSize ?? ui.Size(w.toDouble(), h.toDouble());
+    final full =
+        fullSize ?? ui.Size(src.width.toDouble(), src.height.toDouble());
+    var cur = await _developMain(
+      src,
+      s,
+      profile: profile,
+      scale: scale,
+      origin: origin,
+      full: full,
+      lutSize: lutSize,
+      stats: stats,
+    );
+    var done = false;
+    try {
+      for (final m in s.masks) {
+        if (!m.hasEffect) continue;
+        final next = await _applyMask(
+          m,
+          src: src,
+          cur: cur,
+          scale: scale,
+          origin: origin,
+          full: full,
+          lutSize: lutSize,
+          stats: stats,
+          auto: auto,
+        );
+        cur.dispose();
+        cur = next;
+      }
+      done = true;
+      return cur;
+    } finally {
+      if (!done) cur.dispose();
+    }
+  }
+
+  /// The global edits: a new drawn image the caller owns.
+  Future<ui.Image> _developMain(
+    ui.Image src,
+    EditSettings s, {
+    required ProfileTable? profile,
+    required double scale,
+    required ui.Offset origin,
+    required ui.Size full,
+    required int lutSize,
+    required DevelopStats? stats,
+  }) async {
     final plan = _Plan(s, scale, full);
     final pipeline = ColorPipeline(s, profile: profile);
     // A profile table acts even on neutral settings, so test the pipeline,
@@ -290,64 +379,18 @@ class ShaderDeveloper implements PhotoDeveloper {
         lut = await _lutFor(s, profile, pipeline, lutSize);
       }
 
-      final sh = _program.fragmentShader();
-      try {
-        var i = 0;
-        void f(double v) => sh.setFloat(i++, v);
-        f(w.toDouble());
-        f(h.toDouble());
-        f(origin.dx);
-        f(origin.dy);
-        f(full.width);
-        f(full.height);
-        f(scale);
-        f(lutSize.toDouble());
-        f(lut == null ? 0 : 1);
-        f(s[Setting.exposure]);
-        f(plan.nrLum);
-        f(plan.nrEps);
-        f(plan.nrCol);
-        f(plan.sharpAmt);
-        f(plan.sharpLimit);
-        f(plan.sharpMask);
-        f(plan.texture);
-        f(plan.clarity);
-        f(plan.dehaze);
-        f(air);
-        f(plan.vigAmount);
-        f(plan.vigStart);
-        f(plan.vigWidth);
-        f(plan.vigMix);
-        f(plan.vigPower);
-        f(plan.vigHigh);
-        f(plan.grainAmt);
-        f(plan.grainCell);
-        f(plan.grainRough);
-        // Every read is at a texel centre: no filtering.
-        void sampler(int index, ui.Image img) => sh.setImageSampler(
-          index,
-          img,
-          filterQuality: ui.FilterQuality.none,
-        );
-        final t = tex;
-        sampler(0, t);
-        sampler(1, blurs[_Blur.nrLum] ?? t);
-        sampler(2, blurs[_Blur.nrCol] ?? t);
-        sampler(3, blurs[_Blur.sharp] ?? t);
-        sampler(4, blurs[_Blur.tex] ?? t);
-        sampler(5, blurs[_Blur.clar] ?? t);
-        sampler(6, lut ?? t);
-        return await recordImage(
-          w,
-          h,
-          (c) => c.drawRect(
-            ui.Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
-            ui.Paint()..shader = sh,
-          ),
-        );
-      } finally {
-        sh.dispose();
-      }
+      return await _pass(
+        tex,
+        blurs,
+        lut,
+        plan,
+        ev: s[Setting.exposure],
+        air: air,
+        origin: origin,
+        full: full,
+        scale: scale,
+        lutSize: lutSize,
+      );
     } finally {
       for (final b in blurs.values) {
         b.dispose();
@@ -357,12 +400,248 @@ class ShaderDeveloper implements PhotoDeveloper {
     }
   }
 
+  /// One develop.frag pass over [tex] (a drawn image) with [blurs] of it and
+  /// the colour table [lut]; a new image of [tex]'s size.
+  Future<ui.Image> _pass(
+    ui.Image tex,
+    Map<_Blur, ui.Image> blurs,
+    ui.Image? lut,
+    _Plan plan, {
+    required double ev,
+    required double air,
+    required ui.Offset origin,
+    required ui.Size full,
+    required double scale,
+    required int lutSize,
+  }) async {
+    final w = tex.width, h = tex.height;
+    final sh = _program.fragmentShader();
+    try {
+      var i = 0;
+      void f(double v) => sh.setFloat(i++, v);
+      f(w.toDouble());
+      f(h.toDouble());
+      f(origin.dx);
+      f(origin.dy);
+      f(full.width);
+      f(full.height);
+      f(scale);
+      f(lutSize.toDouble());
+      f(lut == null ? 0 : 1);
+      f(ev);
+      f(plan.nrLum);
+      f(plan.nrEps);
+      f(plan.nrCol);
+      f(plan.sharpAmt);
+      f(plan.sharpLimit);
+      f(plan.sharpMask);
+      f(plan.texture);
+      f(plan.clarity);
+      f(plan.dehaze);
+      f(air);
+      f(plan.vigAmount);
+      f(plan.vigStart);
+      f(plan.vigWidth);
+      f(plan.vigMix);
+      f(plan.vigPower);
+      f(plan.vigHigh);
+      f(plan.grainAmt);
+      f(plan.grainCell);
+      f(plan.grainRough);
+      // Every read is at a texel centre: no filtering.
+      void sampler(int index, ui.Image img) =>
+          sh.setImageSampler(index, img, filterQuality: ui.FilterQuality.none);
+      sampler(0, tex);
+      sampler(1, blurs[_Blur.nrLum] ?? tex);
+      sampler(2, blurs[_Blur.nrCol] ?? tex);
+      sampler(3, blurs[_Blur.sharp] ?? tex);
+      sampler(4, blurs[_Blur.tex] ?? tex);
+      sampler(5, blurs[_Blur.clar] ?? tex);
+      sampler(6, lut ?? tex);
+      return await recordImage(
+        w,
+        h,
+        (c) => c.drawRect(
+          ui.Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+          ui.Paint()..shader = sh,
+        ),
+      );
+    } finally {
+      sh.dispose();
+    }
+  }
+
+  /// Applies [m] to [cur], the image so far (a drawn image of [src]'s
+  /// region): [cur] developed with the mask's settings, mixed back by the
+  /// mask's coverage. A new image; [cur] stays the caller's.
+  Future<ui.Image> _applyMask(
+    Mask m, {
+    required ui.Image src,
+    required ui.Image cur,
+    required double scale,
+    required ui.Offset origin,
+    required ui.Size full,
+    required int lutSize,
+    required DevelopStats? stats,
+    required AutoMapsSource? auto,
+  }) async {
+    final ms = maskSettings(m);
+    final plan = _Plan(ms, scale, full);
+    final pipeline = ColorPipeline(ms);
+    final blurs = <_Blur, ui.Image>{};
+    ui.Image? cov, lut, local;
+    try {
+      cov = await _coverageFor(m, src, origin, full, scale, auto);
+      var air = 1.0;
+      if (plan.dehaze != 0) air = (stats ?? await _measure(cur)).airlight;
+      // Blurs of the image so far: new on every call, so not cached.
+      for (final e in plan.sigmas.entries) {
+        blurs[e.key] = await blurImage(cur, e.value);
+      }
+      if (!pipeline.isIdentity) {
+        lut = await _localLutFor(ms, pipeline, lutSize);
+      }
+      local = await _pass(
+        cur,
+        blurs,
+        lut,
+        plan,
+        ev: ms[Setting.exposure],
+        air: air,
+        origin: origin,
+        full: full,
+        scale: scale,
+        lutSize: lutSize,
+      );
+      return await _mix(cur, local, cov);
+    } finally {
+      for (final b in blurs.values) {
+        b.dispose();
+      }
+      cov?.dispose();
+      lut?.dispose();
+      local?.dispose();
+    }
+  }
+
+  /// mask_apply.frag: `mix(base, local, coverage)`, a new image.
+  Future<ui.Image> _mix(ui.Image base, ui.Image local, ui.Image cov) async {
+    final w = base.width, h = base.height;
+    final sh = _applyProgram.fragmentShader();
+    try {
+      sh.setFloat(0, w.toDouble());
+      sh.setFloat(1, h.toDouble());
+      sh.setImageSampler(0, base, filterQuality: ui.FilterQuality.none);
+      sh.setImageSampler(1, local, filterQuality: ui.FilterQuality.none);
+      sh.setImageSampler(2, cov, filterQuality: ui.FilterQuality.none);
+      return await recordImage(
+        w,
+        h,
+        (c) => c.drawRect(
+          ui.Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+          ui.Paint()..shader = sh,
+        ),
+      );
+    } finally {
+      sh.dispose();
+    }
+  }
+
+  /// A handle the caller disposes to [m]'s coverage of [src]'s region,
+  /// drawn once per (components, region, photo size, scale, inputs).
+  Future<ui.Image> _coverageFor(
+    Mask m,
+    ui.Image src,
+    ui.Offset origin,
+    ui.Size full,
+    double scale,
+    AutoMapsSource? auto,
+  ) async {
+    final key = _Coverage.keyOf(m, src, origin, full, scale);
+    // Only what the coverage reads is part of its identity.
+    final shapes = [for (final c in m.components) c.shape];
+    final readsAuto = shapes.any(
+      (s) => s is SubjectShape || s is SkyShape || s is BackgroundShape,
+    );
+    final readsSrc = shapes.any(
+      (s) => s is LuminanceRangeShape || s is ColourRangeShape,
+    );
+    final a = readsAuto ? auto : null;
+    final r = readsSrc ? src : null;
+    for (final c in _coverages) {
+      if (c.matches(key, a, r)) {
+        _coverages
+          ..remove(c)
+          ..add(c);
+        return c.image.clone();
+      }
+    }
+    final gen = _coverageGen;
+    final img = await _raster.coverage(
+      m,
+      src: src,
+      origin: origin,
+      fullSize: full,
+      scale: scale,
+      auto: auto,
+    );
+    debugCoveragesDrawn++;
+    if (gen != _coverageGen) return img;
+    for (final c in _coverages) {
+      if (c.matches(key, a, r)) {
+        img.dispose();
+        return c.image.clone();
+      }
+    }
+    _coverages.add(_Coverage(key, a, r, img));
+    while (_coverages.length > _maxCoverages) {
+      _coverages.removeAt(0).image.dispose();
+    }
+    return img.clone();
+  }
+
+  /// A handle the caller disposes to the colour table of a mask's settings.
+  Future<ui.Image> _localLutFor(
+    EditSettings ms,
+    ColorPipeline pipeline,
+    int size,
+  ) async {
+    final key = _lutKeyOf(ms, size);
+    for (final e in _localLuts) {
+      if (e.$1 == key) {
+        _localLuts
+          ..remove(e)
+          ..add(e);
+        return e.$2.clone();
+      }
+    }
+    debugLutsBaked++;
+    final table = bakeLut(pipeline, size);
+    final img = await imageFromRgba(table.rgba, size * size, size);
+    for (final e in _localLuts) {
+      if (e.$1 == key) {
+        img.dispose();
+        return e.$2.clone();
+      }
+    }
+    _localLuts.add((key, img));
+    while (_localLuts.length > _maxLocalLuts) {
+      _localLuts.removeAt(0).$2.dispose();
+    }
+    return img.clone();
+  }
+
   @override
   void clearCache() {
     for (final b in _blurSets) {
       b.dispose();
     }
     _blurSets.clear();
+    _coverageGen++;
+    for (final c in _coverages) {
+      c.image.dispose();
+    }
+    _coverages.clear();
   }
 
   @override
@@ -372,6 +651,10 @@ class ShaderDeveloper implements PhotoDeveloper {
     _lut = null;
     _lutKey = null;
     _lutProfile = null;
+    for (final e in _localLuts) {
+      e.$2.dispose();
+    }
+    _localLuts.clear();
   }
 
   /// Measures [src] itself, on a copy of at most 512 px.
@@ -462,8 +745,7 @@ class ShaderDeveloper implements PhotoDeveloper {
     ColorPipeline pipeline,
     int size,
   ) async {
-    final key =
-        '$size ${jsonEncode(s.toPatch().without({ToolGroup.effects, ToolGroup.detail, ToolGroup.masks}).toJson())}';
+    final key = _lutKeyOf(s, size);
     final cached = _lut;
     if (cached != null && _lutKey == key && identical(_lutProfile, profile)) {
       return cached.clone();
@@ -477,4 +759,42 @@ class ShaderDeveloper implements PhotoDeveloper {
     _lutProfile = profile;
     return img.clone();
   }
+}
+
+/// The colour table's cache key: what the table depends on, at [size].
+String _lutKeyOf(EditSettings s, int size) =>
+    '$size ${jsonEncode(s.toPatch().without({ToolGroup.effects, ToolGroup.detail, ToolGroup.masks}).toJson())}';
+
+/// One cached mask coverage.
+class _Coverage {
+  _Coverage(this.key, this.auto, this.src, this.image);
+
+  /// The components, region, photo size and scale.
+  final String key;
+
+  /// The auto maps and the source the coverage read, by identity (null when
+  /// it read none).
+  final AutoMapsSource? auto;
+  final ui.Image? src;
+  final ui.Image image;
+
+  static String keyOf(
+    Mask m,
+    ui.Image src,
+    ui.Offset origin,
+    ui.Size full,
+    double scale,
+  ) => jsonEncode([
+    [for (final c in m.components) c.toJson()],
+    origin.dx,
+    origin.dy,
+    src.width,
+    src.height,
+    full.width,
+    full.height,
+    scale,
+  ]);
+
+  bool matches(String k, AutoMapsSource? a, ui.Image? s) =>
+      key == k && identical(auto, a) && identical(src, s);
 }

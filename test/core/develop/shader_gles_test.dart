@@ -74,6 +74,24 @@ void main() {
     );
   });
 
+  test('mask_apply.frag flips all its texture reads on OpenGL ES', () {
+    final src = File('shaders/mask_apply.frag').readAsStringSync();
+    final flip = RegExp(
+      r'#ifdef\s+IMPELLER_TARGET_OPENGLES\s+uv\.y\s*=\s*1\.0\s*-\s*uv\.y\s*;\s*#endif',
+    );
+    final m = flip.firstMatch(src);
+    expect(m, isNotNull, reason: 'GLES flip of the texture reads is missing');
+    // The base, the local render and the coverage are all drawn images.
+    for (final name in ['uBase', 'uLocal', 'uCov']) {
+      final read = src.indexOf('texture($name, uv)');
+      expect(
+        read,
+        greaterThan(m!.end),
+        reason: '$name must be read after the flip',
+      );
+    }
+  });
+
   testWidgets('range masks sample a drawn copy of the source', (tester) async {
     await tester.runAsync(() async {
       final r = await MaskRasterizer.load();
