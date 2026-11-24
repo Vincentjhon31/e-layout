@@ -305,7 +305,8 @@ void main() {
     testWidgets('tiles are developed in whole-photo coordinates, stats measured once',
         (tester) async {
       await tester.runAsync(() async {
-        // 300 x 200 cropped to the middle 200 x 200, in 64 px tiles.
+        // 300 x 200 cropped to the middle 200 x 200. Tiles are 64 px with their
+        // 10 px margin included, so each step is 64 - 2 x 10 = 44 px.
         final doc = LayoutDoc.blank()
           ..fit = DocFit.crop
           ..ratio = 1;
@@ -315,7 +316,7 @@ void main() {
           final r = await PhotoExporter(tileSize: 64, forcePixelPath: force, developer: dev)
               .render(photoPng(300, 200), doc, null, const ExportSettings(), edit: s);
           expect([r.width, r.height], [200, 200]);
-          expect(dev.calls, hasLength(16), reason: '4 x 4 tiles');
+          expect(dev.calls, hasLength(25), reason: '5 x 5 steps of 44 px');
           final stats = dev.calls.first.$4;
           expect(stats, isNotNull, reason: 'dehaze needs the whole-photo airlight');
           for (final c in dev.calls) {
@@ -323,12 +324,12 @@ void main() {
             expect(c.$2, const ui.Size(300, 200), reason: 'the whole upright photo');
             expect(c.$3, 1);
           }
-          // First tile: photo x 50..114 (crop 50 + tile 0), 10 px margin each side.
+          // First tile: photo x 50..94 (crop 50 + tile 0), 10 px margin each side.
           expect(dev.calls.first.$1, const ui.Offset(40, 0));
-          expect([dev.calls.first.$5, dev.calls.first.$6], [84, 74]);
-          // Last tile: photo x 242..250, y 192..200, the margin stops at the photo.
-          expect(dev.calls.last.$1, const ui.Offset(232, 182));
-          expect([dev.calls.last.$5, dev.calls.last.$6], [28, 18]);
+          expect([dev.calls.first.$5, dev.calls.first.$6], [64, 54]);
+          // Last tile: photo x 226..250, y 176..200, the margin stops at the photo.
+          expect(dev.calls.last.$1, const ui.Offset(216, 166));
+          expect([dev.calls.last.$5, dev.calls.last.$6], [44, 34]);
           expect(dev.cleared, greaterThanOrEqualTo(1));
           // Without Dehaze nothing is measured.
           final dev2 = RecordingDeveloper();
@@ -336,6 +337,25 @@ void main() {
               photoPng(300, 200), doc, null, const ExportSettings(),
               edit: edits({Setting.exposure: 0.5}));
           expect(dev2.calls.every((c) => c.$4 == null), isTrue);
+        }
+      });
+    });
+
+    // Phones using Impeller's OpenGL ES backend returned empty (white) tiles
+    // when a piece was over 2048 px on both sides, which the margin caused.
+    testWidgets('no piece sent to the developer is bigger than the tile size', (tester) async {
+      await tester.runAsync(() async {
+        for (final force in [false, true]) {
+          final dev = RecordingDeveloper();
+          final r = await PhotoExporter(tileSize: 64, forcePixelPath: force, developer: dev)
+              .render(photoPng(245, 326), null, null, const ExportSettings(),
+                  edit: edits({Setting.exposure: 0.5}));
+          expect([r.width, r.height], [245, 326]);
+          expect(dev.calls, isNotEmpty);
+          for (final c in dev.calls) {
+            expect(c.$5, lessThanOrEqualTo(64), reason: 'piece width ${c.$5}');
+            expect(c.$6, lessThanOrEqualTo(64), reason: 'piece height ${c.$6}');
+          }
         }
       });
     });

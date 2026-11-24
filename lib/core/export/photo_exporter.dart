@@ -154,10 +154,17 @@ class PhotoExporter {
       final stats = e != null && e[Setting.dehaze] != 0
           ? await _measure(src, pixels)
           : null;
-      for (var ty = 0; ty < g.h; ty += tileSize) {
-        for (var tx = 0; tx < g.w; tx += tileSize) {
-          final tw = math.min(tileSize, g.w - tx);
-          final th = math.min(tileSize, g.h - ty);
+      // An edited tile is sent to the developer with its margin on every side,
+      // so it steps by less than [tileSize] to keep the whole piece within it.
+      // Phones on Impeller's OpenGL ES backend gave back empty (white) tiles
+      // when a piece was over 2048 px on both sides.
+      final step = e == null
+          ? tileSize
+          : math.max(tileSize ~/ 4, tileSize - 2 * margin);
+      for (var ty = 0; ty < g.h; ty += step) {
+        for (var tx = 0; tx < g.w; tx += step) {
+          final tw = math.min(step, g.w - tx);
+          final th = math.min(step, g.h - ty);
           final rec = ui.PictureRecorder();
           final canvas = ui.Canvas(rec);
           ui.Image? tileSrc;
