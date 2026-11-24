@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pio_photo_layout/core/develop/color_pipeline.dart';
 import 'package:pio_photo_layout/core/develop/photo_developer.dart';
 import 'package:pio_photo_layout/core/develop/profile_table.dart';
+import 'package:pio_photo_layout/core/develop/masks.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
 import 'package:pio_photo_layout/core/develop/shader_developer.dart';
 
@@ -509,6 +510,36 @@ void main() {
       dev.clearCache();
       await develop(dev, src, edit(v(2)));
       expect(dev.debugBlursMade, 9);
+      src.dispose();
+    });
+  });
+
+  testWidgets('changing only masks keeps the colour table cached', (t) async {
+    await withDev(t, () async {
+      final src = await image(richRgba(2));
+      EditSettings withMask(double x) => EditSettings.resolve([
+        SettingsPatch(
+          values: {Setting.exposure: 0.5},
+          masks: [
+            Mask(
+              id: 'a',
+              components: [
+                MaskComponent(
+                  BrushShape([
+                    BrushStroke([(x, 0.5)]),
+                  ]),
+                ),
+              ],
+              adjust: {Setting.exposure: 1},
+            ),
+          ],
+        ),
+      ]);
+      await develop(dev, src, withMask(0.2));
+      final baked = dev.debugLutsBaked;
+      expect(baked, greaterThan(0));
+      await develop(dev, src, withMask(0.7));
+      expect(dev.debugLutsBaked, baked);
       src.dispose();
     });
   });

@@ -408,6 +408,10 @@ class ShaderDeveloper implements PhotoDeveloper {
     return b;
   }
 
+  /// How many colour tables this developer has baked, for tests.
+  @visibleForTesting
+  int debugLutsBaked = 0;
+
   /// How many drawn copies of a source this developer has made, for tests.
   @visibleForTesting
   int debugDrawnCopies = 0;
@@ -459,11 +463,12 @@ class ShaderDeveloper implements PhotoDeveloper {
     int size,
   ) async {
     final key =
-        '$size ${jsonEncode(s.toPatch().without({ToolGroup.effects, ToolGroup.detail}).toJson())}';
+        '$size ${jsonEncode(s.toPatch().without({ToolGroup.effects, ToolGroup.detail, ToolGroup.masks}).toJson())}';
     final cached = _lut;
     if (cached != null && _lutKey == key && identical(_lutProfile, profile)) {
       return cached.clone();
     }
+    debugLutsBaked++;
     final table = bakeLut(pipeline, size);
     final img = await imageFromRgba(table.rgba, size * size, size);
     _lut?.dispose();
