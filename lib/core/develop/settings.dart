@@ -1,8 +1,11 @@
 import 'dart:convert';
 
+import 'masks.dart';
+
 /// Which tool panel a setting belongs to. Curves are in [light]; the colour
-/// profile and black-and-white switch are in [colour].
-enum ToolGroup { light, colour, effects, detail }
+/// profile and black-and-white switch are in [colour]. Masks and lens blur
+/// are in [masks].
+enum ToolGroup { light, colour, effects, detail, masks }
 
 /// One numeric adjustment: its group, allowed range, neutral value and the
 /// `crs:` attribute name used by preset files.
@@ -178,7 +181,10 @@ class SettingsPatch {
     this.profile,
     this.grayscale,
     Map<String, String> extras = const {},
-  }) : values = Map.unmodifiable(values),
+    List<Mask>? masks,
+    this.lensBlur,
+  }) : masks = masks == null ? null : List.unmodifiable(masks.take(kMaxMasks)),
+       values = Map.unmodifiable(values),
        curves = Map<CurveChannel, List<CurvePoint>>.unmodifiable({
          for (final e in curves.entries)
            e.key: List<CurvePoint>.unmodifiable(e.value),
@@ -193,12 +199,20 @@ class SettingsPatch {
   /// Unparsed `crs:` values kept for later phases.
   final Map<String, String> extras;
 
+  /// All masks of the photo. Non-null replaces the whole list (no merging).
+  final List<Mask>? masks;
+
+  /// Non-null replaces the whole lens blur.
+  final LensBlur? lensBlur;
+
   bool get isEmpty =>
       values.isEmpty &&
       curves.isEmpty &&
       profile == null &&
       grayscale == null &&
-      extras.isEmpty;
+      extras.isEmpty &&
+      masks == null &&
+      lensBlur == null;
 
   /// This patch with [top] applied over it: top wins per key.
   SettingsPatch over(SettingsPatch top) => SettingsPatch(
@@ -207,6 +221,8 @@ class SettingsPatch {
     profile: top.profile ?? profile,
     grayscale: top.grayscale ?? grayscale,
     extras: {...extras, ...top.extras},
+    masks: top.masks ?? masks,
+    lensBlur: top.lensBlur ?? lensBlur,
   );
 
   SettingsPatch only(Set<ToolGroup> g) => SettingsPatch(
@@ -218,6 +234,8 @@ class SettingsPatch {
     profile: g.contains(ToolGroup.colour) ? profile : null,
     grayscale: g.contains(ToolGroup.colour) ? grayscale : null,
     extras: extras,
+    masks: g.contains(ToolGroup.masks) ? masks : null,
+    lensBlur: g.contains(ToolGroup.masks) ? lensBlur : null,
   );
 
   SettingsPatch without(Set<ToolGroup> g) => SettingsPatch(
@@ -229,6 +247,8 @@ class SettingsPatch {
     profile: g.contains(ToolGroup.colour) ? null : profile,
     grayscale: g.contains(ToolGroup.colour) ? null : grayscale,
     extras: extras,
+    masks: g.contains(ToolGroup.masks) ? null : masks,
+    lensBlur: g.contains(ToolGroup.masks) ? null : lensBlur,
   );
 
   Map<String, dynamic> toJson() => {
@@ -248,6 +268,8 @@ class SettingsPatch {
         : {'id': profile!.id, 'name': profile!.name, 'amount': profile!.amount},
     'grayscale': grayscale,
     'extras': {for (final k in extras.keys.toList()..sort()) k: extras[k]},
+    if (masks != null) 'masks': [for (final m in masks!) m.toJson()],
+    if (lensBlur != null) 'lensBlur': lensBlur!.toJson(),
   };
 
   /// Reads a patch, clamping values to range and skipping unknown keys.
@@ -304,6 +326,8 @@ class SettingsPatch {
 
     final rawGray = json['grayscale'];
     final rawExtras = json['extras'];
+    final rawMasks = json['masks'];
+    final rawLens = json['lensBlur'];
     return SettingsPatch(
       values: values,
       curves: curves,
@@ -312,19 +336,37 @@ class SettingsPatch {
       extras: rawExtras is Map
           ? {for (final e in rawExtras.entries) '${e.key}': '${e.value}'}
           : const {},
+      masks: rawMasks is List
+          ? [
+              for (final m in rawMasks.take(kMaxMasks))
+                if (m is Map) Mask.fromJson(Map<String, dynamic>.from(m)),
+            ]
+          : null,
+      lensBlur: rawLens is Map
+          ? LensBlur.fromJson(Map<String, dynamic>.from(rawLens))
+          : null,
     );
   }
 }
 
 /// A fully resolved set of settings: neutral, then each layer in order.
 class EditSettings {
-  EditSettings._(this._values, this._curves, this._profile, this._grayscale);
+  EditSettings._(
+    this._values,
+    this._curves,
+    this._profile,
+    this._grayscale,
+    this._masks,
+    this._lensBlur,
+  );
 
   factory EditSettings.resolve(List<SettingsPatch> layers) {
     final values = {for (final s in Setting.values) s: s.neutral};
     final curves = <CurveChannel, List<CurvePoint>>{};
     var profile = ProfileRef.none;
     var gray = false;
+    var masks = const <Mask>[];
+    var lens = LensBlur.off;
     for (final l in layers) {
       for (final e in l.values.entries) {
         values[e.key] = e.key.clamp(e.value);
@@ -332,12 +374,16 @@ class EditSettings {
       curves.addAll(l.curves);
       if (l.profile != null) profile = l.profile!;
       if (l.grayscale != null) gray = l.grayscale!;
+      if (l.masks != null) masks = l.masks!;
+      if (l.lensBlur != null) lens = l.lensBlur!;
     }
     return EditSettings._(
       Map.unmodifiable(values),
       Map.unmodifiable(curves),
       profile,
       gray,
+      List.unmodifiable(masks),
+      lens,
     );
   }
 
@@ -345,6 +391,8 @@ class EditSettings {
   final Map<CurveChannel, List<CurvePoint>> _curves;
   final ProfileRef _profile;
   final bool _grayscale;
+  final List<Mask> _masks;
+  final LensBlur _lensBlur;
 
   double operator [](Setting s) => _values[s]!;
 
@@ -352,6 +400,8 @@ class EditSettings {
 
   ProfileRef get profile => _profile;
   bool get grayscale => _grayscale;
+  List<Mask> get masks => _masks;
+  LensBlur get lensBlur => _lensBlur;
 
   bool get isNeutral {
     for (final s in Setting.values) {
@@ -365,6 +415,10 @@ class EditSettings {
         return false;
       }
     }
+    if (_lensBlur.isOn) return false;
+    for (final m in _masks) {
+      if (m.hasEffect) return false;
+    }
     return _profile.isNone && !_grayscale;
   }
 
@@ -374,6 +428,8 @@ class EditSettings {
     curves: {for (final c in CurveChannel.values) c: curve(c)},
     profile: _profile,
     grayscale: _grayscale,
+    masks: _masks,
+    lensBlur: _lensBlur,
   );
 
   /// A canonical string for caches: equal settings give equal keys.

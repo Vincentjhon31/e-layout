@@ -16,6 +16,12 @@ const Map<ToolGroup, String> _kGroupNames = {
   ToolGroup.detail: 'Detail',
 };
 
+/// The groups the sheet offers. Masks get their checkbox in a later task.
+final List<ToolGroup> _kSheetGroups = [
+  for (final g in ToolGroup.values)
+    if (_kGroupNames.containsKey(g)) g,
+];
+
 /// Opens "Copy to all photos". After Copy, [context] shows the toast.
 Future<void> showCopyToAll(BuildContext context, PhotoEditorController c) {
   return showAppSheet<void>(
@@ -53,7 +59,7 @@ class CopyToAllSheet extends StatefulWidget {
 }
 
 class _CopyToAllSheetState extends State<CopyToAllSheet> {
-  final Set<ToolGroup> _groups = ToolGroup.values.toSet();
+  final Set<ToolGroup> _groups = _kSheetGroups.toSet();
   bool _keepSingle = true;
 
   @override
@@ -76,7 +82,7 @@ class _CopyToAllSheetState extends State<CopyToAllSheet> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Column(
                 children: [
-                  for (final g in ToolGroup.values) ...[
+                  for (final g in _kSheetGroups) ...[
                     _GroupRow(
                       label: _kGroupNames[g]!,
                       on: _groups.contains(g),

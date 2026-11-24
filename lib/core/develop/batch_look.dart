@@ -3,8 +3,9 @@ import 'settings.dart';
 /// A shared preset for a batch of photos plus per-photo overrides.
 ///
 /// Overrides replace the shared value per setting. Per-photo overrides never
-/// carry `extras` (they are stripped), so an override is empty exactly when
-/// [SettingsPatch.isEmpty] says so, and empty ones are removed from [photos].
+/// carry `extras` (they are stripped; masks and lens blur stay), so an
+/// override is empty exactly when [SettingsPatch.isEmpty] says so, and empty
+/// ones are removed from [photos].
 class BatchLook {
   const BatchLook()
     : _shared = null,
@@ -35,6 +36,8 @@ class BatchLook {
           curves: p.curves,
           profile: p.profile,
           grayscale: p.grayscale,
+          masks: p.masks,
+          lensBlur: p.lensBlur,
         );
 
   static BatchLook _make(
