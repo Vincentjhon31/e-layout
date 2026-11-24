@@ -67,7 +67,7 @@ class BrushStroke {
 
   final List<(double, double)> points;
 
-  /// Brush diameter as a fraction of the long edge.
+  /// Brush radius as a fraction of the long edge.
   final double size;
   final double feather;
   final double flow;

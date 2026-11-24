@@ -78,40 +78,121 @@ const List<double> _greyToAlpha = [
   1, 0, 0, 0, 0, //
 ];
 
-/// Dabs a mask's brush strokes may lay in all; past it, strokes stop (the
-/// same dabs whatever region is drawn).
-const int kMaxBrushDabs = 100000;
+/// Dabs a mask's brush strokes lay in all, at most (plus each stroke's two
+/// end dabs). 64 strokes of realistic drags fit well inside it: a smallest
+/// brush (radius 0.5 % of the long edge) lays 800 dabs per long edge of path.
+const int kMaxBrushDabs = 262144;
 
-/// Dab centres along [pts] for a brush of radius [r] px, at most [max]:
-/// LightCraft `push_dabs` (masks.rs). Evenly spaced at most `max(r/4, 0.5)`
-/// apart, each segment ending on its point; points that do not move or are
-/// not finite lay nothing.
-List<ui.Offset> brushDabs(List<ui.Offset> pts, double r, int max) {
-  final step = math.max(r / 4, 0.5);
-  final out = <ui.Offset>[];
+/// Distance between dabs of a brush of radius [r] px: LightCraft
+/// `dab_spacing` (masks.rs), a quarter of the radius, at least half a pixel.
+double dabSpacing(double r) => math.max(r / 4, 0.5);
+
+/// A stroke's brush radius in px: `size × long edge`, at least half a pixel
+/// (LightCraft `brush_dabs`).
+double brushRadius(BrushStroke st, double long) =>
+    math.max(st.size * long, 0.5);
+
+double _pathLength(List<ui.Offset> pts) {
+  var sum = 0.0;
   ui.Offset? prev;
   for (final q in pts) {
-    if (out.length >= max) break;
     if (!q.dx.isFinite || !q.dy.isFinite) continue;
     final p = prev;
-    if (p != null) {
-      final dist = (q - p).distance;
-      if (!(dist > 1e-6)) continue;
-      final n = math.min((dist / step).ceil(), max - out.length);
-      for (var k = 1; k < n; k++) {
-        out.add(ui.Offset.lerp(p, q, k / n)!);
-      }
-    }
-    if (out.length >= max) break;
-    out.add(q);
+    if (p != null) sum += (q - p).distance;
     prev = q;
   }
+  return sum;
+}
+
+/// Dab centres along the path [pts], [step] px apart by arc length, from the
+/// first point to the last (after LightCraft `push_dabs`, masks.rs). The
+/// spacing carries across segments, so dense points lay no extra dabs.
+/// Points that do not move or are not finite lay nothing.
+List<ui.Offset> brushDabs(List<ui.Offset> pts, double step) {
+  assert(step > 0);
+  final out = <ui.Offset>[];
+  ui.Offset? prev;
+  var since = 0.0; // path length from the last dab to prev
+  for (final q in pts) {
+    if (!q.dx.isFinite || !q.dy.isFinite) continue;
+    final p = prev;
+    if (p == null) {
+      out.add(q);
+      prev = q;
+      continue;
+    }
+    final seg = (q - p).distance;
+    if (!(seg > 1e-6)) continue;
+    var t = step - since;
+    while (t <= seg) {
+      out.add(ui.Offset.lerp(p, q, t / seg)!);
+      t += step;
+    }
+    since = seg - (t - step);
+    prev = q;
+  }
+  if (prev != null && since > 1e-6) out.add(prev);
   return out;
+}
+
+/// The dabs of each of [s]'s strokes on a photo of [full] render px, in
+/// photo px (empty for a stroke with no flow).
+///
+/// Past [cap] dabs, spacing widens by one factor for all paint strokes, so
+/// they thin evenly and none is dropped. Erase strokes are budgeted first
+/// and keep their spacing unless they alone pass [cap]. The plan depends
+/// only on the mask and the photo size, never on the region drawn.
+List<List<ui.Offset>> planBrushDabs(
+  BrushShape s,
+  ui.Size full, {
+  int cap = kMaxBrushDabs,
+}) {
+  final long = math.max(full.width, full.height);
+  final n = s.strokes.length;
+  final pts = <List<ui.Offset>>[];
+  final steps = <double>[];
+  var eraseNeed = 0.0, paintNeed = 0.0;
+  for (final st in s.strokes) {
+    final p = [
+      for (final q in st.points)
+        ui.Offset(q.$1 * full.width, q.$2 * full.height),
+    ];
+    final step = dabSpacing(brushRadius(st, long));
+    final k = st.flow > 0 ? _pathLength(p) / step : 0.0;
+    pts.add(p);
+    steps.add(step);
+    if (st.erase) {
+      eraseNeed += k;
+    } else {
+      paintNeed += k;
+    }
+  }
+  final room = math.max(cap - 2 * n, 1).toDouble();
+  final eraseK = eraseNeed > room ? eraseNeed / room : 1.0;
+  final paintRoom = math.max(room - eraseNeed / eraseK, 1.0);
+  final paintK = paintNeed > paintRoom ? paintNeed / paintRoom : 1.0;
+  return [
+    for (var i = 0; i < n; i++)
+      if (s.strokes[i].flow <= 0)
+        const <ui.Offset>[]
+      else
+        brushDabs(pts[i], steps[i] * (s.strokes[i].erase ? eraseK : paintK)),
+  ];
 }
 
 bool _isRange(MaskShape s) => s is LuminanceRangeShape || s is ColourRangeShape;
 
 /// Draws mask coverage: white images with coverage 0 to 1 in alpha.
+///
+/// Ported from LightCraft (MIT OR Apache-2.0), crates/pipeline/src/masks.rs,
+/// with these e-Layout choices:
+///  - Luminance range reads Rec.709 luma of the display-referred sRGB
+///    source, re-encoded to sRGB (a grey's level is its value), not
+///    LightCraft's log luminance mapped from -8 to +4 EV.
+///  - Colour range has no select tone map and takes OkLab from linear sRGB.
+///  - Brush flow is per stroke (the stroke layer's opacity), not per dab.
+///  - Gradient fall-offs are 8-step approximations of LightCraft's
+///    smoothstep.
 ///
 /// Coverage depends only on the photo position: a region's pixels match the
 /// same pixels of a render of the whole photo. Positions in a [Mask] are
@@ -318,36 +399,45 @@ class MaskRasterizer {
     );
   }
 
-  /// Each stroke a run of soft round dabs (LightCraft `brush_dabs`,
-  /// `push_dabs`, `dab_alpha`, masks.rs): radius `size × long edge`, at
-  /// least half a pixel; dabs a quarter of the radius apart along the path;
-  /// each one full inside `radius × (1 − feather/100)` and falling as a
-  /// smoothstep to 0 at the radius. A stroke is the max of its dabs, with
-  /// flow as its alpha; erase strokes clear (`dstOut`).
+  /// Each stroke a run of soft round dabs ([planBrushDabs]), each one full
+  /// inside `radius × (1 − feather/100)` and falling as a smoothstep to 0 at
+  /// the radius (LightCraft `dab_alpha`, masks.rs), with at least a pixel of
+  /// fall-off. Dabs build up within a stroke with srcOver, `1 − Π(1 − a)`
+  /// (LightCraft `accumulate`). Flow is per stroke, not per dab: it is the
+  /// opacity of the stroke's layer, which is drawn over the strokes before
+  /// it, or clears them (`dstOut`) for an erase stroke.
   ///
   /// Dabs are radial gradients, so every pixel's coverage is a function of
   /// its photo position only. (A stroked path's anti-aliasing changed with
   /// the region drawn, by up to 27/255.) Only dabs that touch [view], the
-  /// region in photo pixels, are drawn.
+  /// region in photo px, are drawn, in a layer bounded to them.
   void _brush(ui.Canvas c, BrushShape s, double fw, double fh, ui.Rect view) {
     final long = math.max(fw, fh);
-    var budget = kMaxBrushDabs;
-    for (final st in s.strokes) {
-      if (budget <= 0) break;
-      if (st.points.isEmpty || st.flow <= 0) continue;
-      final r = math.max(st.size * long, 0.5);
-      final dabs = brushDabs(
-        [for (final p in st.points) ui.Offset(p.$1 * fw, p.$2 * fh)],
-        r,
-        budget,
-      );
-      budget -= dabs.length;
+    final plan = planBrushDabs(s, ui.Size(fw, fh));
+    for (var i = 0; i < s.strokes.length; i++) {
+      final st = s.strokes[i];
+      final r = brushRadius(st, long);
       final near = view.inflate(r + 1);
       final inView = [
-        for (final d in dabs)
+        for (final d in plan[i])
           if (near.contains(d)) d,
       ];
       if (inView.isEmpty) continue;
+      var minX = inView.first.dx, maxX = minX;
+      var minY = inView.first.dy, maxY = minY;
+      for (final d in inView) {
+        minX = math.min(minX, d.dx);
+        maxX = math.max(maxX, d.dx);
+        minY = math.min(minY, d.dy);
+        maxY = math.max(maxY, d.dy);
+      }
+      final bounds = ui.Rect.fromLTRB(
+        minX,
+        minY,
+        maxX,
+        maxY,
+      ).inflate(r + 1).intersect(view);
+      if (bounds.isEmpty) continue;
 
       // Full inside the hard core, at least a pixel of fall-off.
       final hard = math.max(0.0, math.min(1 - st.feather / 100, (r - 1) / r));
@@ -358,30 +448,19 @@ class MaskRasterizer {
         stops.add(0);
       }
       for (var k = 0; k <= _kSteps; k++) {
-        final g = ((1 - _smooth(k / _kSteps)) * 255).round();
-        colors.add(ui.Color.fromARGB(255, g, g, g));
+        colors.add(_alpha(1 - _smooth(k / _kSteps)));
         stops.add(hard + (1 - hard) * k / _kSteps);
       }
       final dab = ui.Paint()
-        ..blendMode = ui.BlendMode.lighten
         ..shader = ui.Gradient.radial(ui.Offset.zero, r, colors, stops);
       final box = ui.Rect.fromCircle(center: ui.Offset.zero, radius: r + 1);
 
-      // The stroke is built as opaque grey (lighten is then the max), and
-      // turned into white with flow × grey as its alpha.
-      final f = st.flow / 100;
       c.saveLayer(
-        null,
+        bounds,
         ui.Paint()
-          ..blendMode = st.erase ? ui.BlendMode.dstOut : ui.BlendMode.srcOver
-          ..colorFilter = ui.ColorFilter.matrix([
-            0, 0, 0, 0, 255, //
-            0, 0, 0, 0, 255, //
-            0, 0, 0, 0, 255, //
-            f, 0, 0, 0, 0, //
-          ]),
+          ..color = _alpha(st.flow / 100)
+          ..blendMode = st.erase ? ui.BlendMode.dstOut : ui.BlendMode.srcOver,
       );
-      c.drawPaint(ui.Paint()..color = _black);
       for (final d in inView) {
         c.save();
         c.translate(d.dx, d.dy);

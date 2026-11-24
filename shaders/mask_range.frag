@@ -13,7 +13,10 @@ precision highp float;
 // at a quarter; full coverage up to half the tolerance, none past it.
 // Departures, e-Layout proposals: the source is display-referred sRGB, so
 // there is no select tone map, and OkLab is taken from linear sRGB, not
-// Rec.2020. OkLab: Bjorn Ottosson (public domain / MIT).
+// Rec.2020. Luminance range reads Rec.709 luma of the display-referred sRGB
+// source, re-encoded to sRGB (a grey's level is its value), not LightCraft's
+// log luminance mapped from -8 to +4 EV; the band edges are LightCraft's
+// smoothsteps. OkLab: Bjorn Ottosson (public domain / MIT).
 //
 // Uniform layout. MaskRasterizer sets these in this exact order; keep the
 // copy in mask_raster.dart the same.

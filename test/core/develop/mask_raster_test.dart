@@ -156,24 +156,114 @@ void main() {
     });
   });
 
-  test('brush dabs are spaced a quarter radius apart and capped', () {
-    final d = brushDabs(const [ui.Offset(0, 0), ui.Offset(40, 0)], 8, 1000);
+  test('brush dabs are spaced by arc length across segments', () {
+    final d = brushDabs(const [ui.Offset(0, 0), ui.Offset(40, 0)], 2);
     expect(d.length, 21);
     expect(d.first, ui.Offset.zero);
     expect(d.last, const ui.Offset(40, 0));
-    final zigzag = [
-      for (var i = 0; i < 2000; i++) ui.Offset(i.isEven ? 0 : 4000, 0),
-    ];
-    expect(brushDabs(zigzag, 0.5, 500).length, 500);
+    // 2000 dense points along the same line lay the same dabs.
+    final dense = [for (var i = 0; i < 2000; i++) ui.Offset(i * 40 / 1999, 0)];
+    expect(brushDabs(dense, 2).length, 21);
+    expect(dabSpacing(8), 2);
+    expect(dabSpacing(1), 0.5);
     // A held point lays one dab; non-finite points lay none.
-    expect(
-      brushDabs(const [ui.Offset(1, 1), ui.Offset(1, 1)], 4, 10).length,
-      1,
-    );
-    expect(
-      brushDabs(const [ui.Offset(double.nan, 1), ui.Offset(2, 2)], 4, 10),
-      [const ui.Offset(2, 2)],
-    );
+    expect(brushDabs(const [ui.Offset(1, 1), ui.Offset(1, 1)], 4).length, 1);
+    expect(brushDabs(const [ui.Offset(double.nan, 1), ui.Offset(2, 2)], 4), [
+      const ui.Offset(2, 2),
+    ]);
+  });
+
+  test(
+    'past the dab cap, paint strokes thin evenly and erases keep theirs',
+    () {
+      // 63 scribbles of 2000 points across the whole photo at the smallest
+      // size, then an erase: far past the cap.
+      final strokes = [
+        for (var k = 0; k < 63; k++)
+          BrushStroke([
+            for (var i = 0; i < kMaxPoints; i++)
+              (i.isEven ? 0.0 : 1.0, (k + i / kMaxPoints) / 64),
+          ], size: 0.005),
+        BrushStroke(
+          [for (var i = 0; i < kMaxPoints; i++) (0.5, i / (kMaxPoints - 1))],
+          size: 0.005,
+          erase: true,
+        ),
+      ];
+      expect(strokes.length, kMaxStrokes);
+      const full = ui.Size(4000, 3000);
+      final plan = planBrushDabs(BrushShape(strokes), full);
+      final total = plan.fold(0, (n, d) => n + d.length);
+      expect(total, lessThanOrEqualTo(kMaxBrushDabs + 2 * kMaxStrokes));
+      expect(total, greaterThan(kMaxBrushDabs * 0.9));
+      // Every stroke keeps dabs, in proportion to its length.
+      final counts = [for (final d in plan.take(63)) d.length];
+      expect(
+        counts.reduce(math.min),
+        greaterThan(counts.reduce(math.max) * 0.9),
+      );
+      // The erase is not thinned.
+      final erase = strokes.last;
+      final pts = [
+        for (final q in erase.points)
+          ui.Offset(q.$1 * full.width, q.$2 * full.height),
+      ];
+      expect(
+        plan.last.length,
+        brushDabs(pts, dabSpacing(brushRadius(erase, 4000))).length,
+      );
+      // A small cap thins the paint strokes, never drops one.
+      final small = planBrushDabs(BrushShape(strokes), full, cap: 1000);
+      expect(small.every((d) => d.length >= 2), isTrue);
+    },
+  );
+
+  testWidgets('at the limits, the last stroke still erases its area', (
+    t,
+  ) async {
+    await withR(t, () async {
+      // 63 realistic drags, 2000 points each, then an erase down the middle.
+      final strokes = [
+        for (var k = 0; k < 63; k++)
+          BrushStroke([
+            for (var i = 0; i < kMaxPoints; i++)
+              (0.02 + 0.96 * i / (kMaxPoints - 1), (k + 0.5) / 63),
+          ], size: 0.02),
+        BrushStroke(
+          [for (var i = 0; i < kMaxPoints; i++) (0.5, i / (kMaxPoints - 1))],
+          size: 0.05,
+          feather: 0,
+          erase: true,
+        ),
+      ];
+      final c = await one(BrushShape(strokes));
+      for (var y = 4; y < 60; y++) {
+        expect(c.at(32, y), lessThan(0.02), reason: 'erased at y $y');
+        expect(c.at(12, y), greaterThan(0.9), reason: 'painted at y $y');
+      }
+    });
+  });
+
+  testWidgets('a mask far past the dab cap still draws and erases', (t) async {
+    await withR(t, () async {
+      final strokes = [
+        for (var k = 0; k < 63; k++)
+          BrushStroke([
+            for (var i = 0; i < kMaxPoints; i++)
+              (i.isEven ? 0.0 : 1.0, (k + i / kMaxPoints) / 64),
+          ], size: 0.005),
+        BrushStroke(
+          [for (var i = 0; i < kMaxPoints; i++) (0.5, i / (kMaxPoints - 1))],
+          size: 0.05,
+          feather: 0,
+          erase: true,
+        ),
+      ];
+      final c = await one(BrushShape(strokes));
+      for (var y = 4; y < 60; y++) {
+        expect(c.at(32, y), lessThan(0.02), reason: 'erased at y $y');
+      }
+    });
   });
 
   testWidgets('add is the max, subtract a(1-c), intersect a*c', (t) async {
@@ -317,69 +407,124 @@ void main() {
     t,
   ) async {
     await withR(t, () async {
-      final m = mask([
-        MaskComponent(
-          RadialShape(
-            cx: 0.45,
-            cy: 0.55,
-            rx: 0.3,
-            ry: 0.2,
-            angle: 30,
-            feather: 70,
-          ),
-        ),
-        MaskComponent(
-          BrushShape([
-            BrushStroke([(0.3, 0.2), (0.55, 0.35), (0.7, 0.8)], feather: 60),
-            BrushStroke(
-              [(0.48, 0.1), (0.52, 0.9)],
-              size: 0.03,
-              feather: 80,
-              flow: 60,
-              erase: true,
-            ),
-          ]),
-        ),
-        MaskComponent(LinearShape(0.1, 0.9, 0.8, 0.3), op: MaskOp.subtract),
-        MaskComponent(
-          LuminanceRangeShape(low: 0.2, high: 0.8, smooth: 30),
-          op: MaskOp.intersect,
-        ),
-      ]);
-      final whole = await cov(m);
-      Future<ui.Image> half(int x0) => recordImage(
-        32,
+      final src = await imageFromRgba(
+        fillRgba(kW, kH, (x, y) => (x * 4, y * 4, 255 - x * 2 - y * 2)),
+        kW,
         kH,
-        (c) => c.drawImage(grey, ui.Offset(-x0.toDouble(), 0), ui.Paint()),
       );
-      var worst = 0.0;
-      for (final x0 in [0, 32]) {
-        final src = await half(x0);
-        try {
-          final part = await cov(
-            m,
-            src: src,
-            origin: ui.Offset(x0.toDouble(), 0),
-          );
-          for (var y = 0; y < kH; y++) {
-            for (var x = 0; x < 32; x++) {
-              worst = math.max(
-                worst,
-                (part.at(x, y) - whole.at(x0 + x, y)).abs(),
+      // A 16 x 12 gradient map: stretched with filtering over the photo.
+      final map = await recordImage(
+        16,
+        12,
+        (c) => c.drawRect(
+          const ui.Rect.fromLTWH(0, 0, 16, 12),
+          ui.Paint()
+            ..shader = ui.Gradient.linear(
+              ui.Offset.zero,
+              const ui.Offset(16, 12),
+              const [ui.Color(0x00FFFFFF), ui.Color(0xFFFFFFFF)],
+            ),
+        ),
+      );
+      final auto = FakeAuto(map, map);
+      final masks = [
+        mask([
+          MaskComponent(
+            RadialShape(
+              cx: 0.45,
+              cy: 0.55,
+              rx: 0.3,
+              ry: 0.2,
+              angle: 30,
+              feather: 70,
+            ),
+          ),
+          MaskComponent(
+            BrushShape([
+              BrushStroke([(0.3, 0.2), (0.55, 0.35), (0.7, 0.8)], feather: 60),
+              BrushStroke(
+                [(0.48, 0.1), (0.52, 0.9)],
+                size: 0.03,
+                feather: 80,
+                flow: 60,
+                erase: true,
+              ),
+            ]),
+          ),
+          MaskComponent(LinearShape(0.1, 0.9, 0.8, 0.3), op: MaskOp.subtract),
+          MaskComponent(
+            LuminanceRangeShape(low: 0.2, high: 0.8, smooth: 30),
+            op: MaskOp.intersect,
+          ),
+        ]),
+        mask([
+          MaskComponent(
+            ColourRangeShape([(0.5, 0.5, 0.5), (0.9, 0.2, 0.4)], refine: 80),
+          ),
+          const MaskComponent(SubjectShape()),
+          const MaskComponent(SkyShape(), op: MaskOp.subtract),
+          const MaskComponent(BackgroundShape()),
+        ]),
+      ];
+      // Halves split across x, then across y.
+      final parts = [
+        const ui.Rect.fromLTWH(0, 0, 32, 64),
+        const ui.Rect.fromLTWH(32, 0, 32, 64),
+        const ui.Rect.fromLTWH(0, 0, 64, 32),
+        const ui.Rect.fromLTWH(0, 32, 64, 32),
+      ];
+      try {
+        for (final m in masks) {
+          final whole = await cov(m, src: src, auto: auto);
+          var worst = 0.0;
+          for (final part in parts) {
+            final pw = part.width.toInt(), ph = part.height.toInt();
+            final x0 = part.left.toInt(), y0 = part.top.toInt();
+            final psrc = await recordImage(
+              pw,
+              ph,
+              (c) => c.drawImage(
+                src,
+                ui.Offset(-part.left, -part.top),
+                ui.Paint(),
+              ),
+            );
+            try {
+              final p = await cov(
+                m,
+                src: psrc,
+                origin: part.topLeft,
+                auto: auto,
               );
+              for (var y = 0; y < ph; y++) {
+                for (var x = 0; x < pw; x++) {
+                  worst = math.max(
+                    worst,
+                    (p.at(x, y) - whole.at(x0 + x, y0 + y)).abs(),
+                  );
+                }
+              }
+            } finally {
+              psrc.dispose();
             }
           }
-        } finally {
-          src.dispose();
+          // (2/255 exactly, with room for the float subtraction)
+          expect(worst, lessThanOrEqualTo(2 / 255 + 1e-9));
+          // The mask is partly covered, so the comparison means something.
+          var lo = 1.0, hi = 0.0;
+          for (var y = 0; y < kH; y++) {
+            for (var x = 0; x < kW; x++) {
+              lo = math.min(lo, whole.at(x, y));
+              hi = math.max(hi, whole.at(x, y));
+            }
+          }
+          expect(lo, lessThan(0.1));
+          expect(hi, greaterThan(0.5));
         }
+      } finally {
+        map.dispose();
+        src.dispose();
       }
-      expect(worst, lessThanOrEqualTo(2 / 255));
-      // The mask is not empty, so the comparison means something.
-      var sum = 0.0;
-      for (var i = 3; i < whole.rgba.length; i += 4) {
-        sum += whole.rgba[i];
-      }
-      expect(sum, greaterThan(0));
     });
   });
 
