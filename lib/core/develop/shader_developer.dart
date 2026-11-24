@@ -189,6 +189,10 @@ class _BlurSet {
   final ui.Image src;
   final double scale, long;
   final Map<(_Blur, double), ui.Image> images = {};
+
+  /// [src] drawn into a new image, so the shader samples the same kind of
+  /// texture as the blurs (see [ShaderDeveloper._drawnSource]).
+  ui.Image? drawn;
   bool evicted = false;
 
   bool matches(ui.Image s, double sc, double l) =>
@@ -212,6 +216,8 @@ class _BlurSet {
       i.dispose();
     }
     images.clear();
+    drawn?.dispose();
+    drawn = null;
   }
 }
 
@@ -273,8 +279,10 @@ class ShaderDeveloper implements PhotoDeveloper {
     // Images below are this call's own handles (clones), freed at the end.
     final blurs = <_Blur, ui.Image>{};
     ui.Image? lut;
+    ui.Image? tex;
     try {
       final set = _blurSetFor(src, scale, math.max(full.width, full.height));
+      tex = await _drawnSource(set);
       for (final e in plan.sigmas.entries) {
         blurs[e.key] = await _blur(set, e.key, e.value);
       }
@@ -321,13 +329,14 @@ class ShaderDeveloper implements PhotoDeveloper {
           img,
           filterQuality: ui.FilterQuality.none,
         );
-        sampler(0, src);
-        sampler(1, blurs[_Blur.nrLum] ?? src);
-        sampler(2, blurs[_Blur.nrCol] ?? src);
-        sampler(3, blurs[_Blur.sharp] ?? src);
-        sampler(4, blurs[_Blur.tex] ?? src);
-        sampler(5, blurs[_Blur.clar] ?? src);
-        sampler(6, lut ?? src);
+        final t = tex;
+        sampler(0, t);
+        sampler(1, blurs[_Blur.nrLum] ?? t);
+        sampler(2, blurs[_Blur.nrCol] ?? t);
+        sampler(3, blurs[_Blur.sharp] ?? t);
+        sampler(4, blurs[_Blur.tex] ?? t);
+        sampler(5, blurs[_Blur.clar] ?? t);
+        sampler(6, lut ?? t);
         return await recordImage(
           w,
           h,
@@ -344,6 +353,7 @@ class ShaderDeveloper implements PhotoDeveloper {
         b.dispose();
       }
       lut?.dispose();
+      tex?.dispose();
     }
   }
 
@@ -396,6 +406,32 @@ class ShaderDeveloper implements PhotoDeveloper {
       _blurSets.removeAt(0).dispose();
     }
     return b;
+  }
+
+  /// How many drawn copies of a source this developer has made, for tests.
+  @visibleForTesting
+  int debugDrawnCopies = 0;
+
+  /// A handle the caller disposes to [set]'s source drawn into a new image.
+  ///
+  /// Impeller's OpenGL ES backend stores images it drew (blurs, copies) bottom
+  /// up, unlike images uploaded from a decoder, and only its own drawing code
+  /// corrects for that. The shader flips its reads on GLES, so every photo
+  /// texture it samples must be a drawn one: the blurs already are, and this
+  /// makes the source one too, whatever the caller passed.
+  Future<ui.Image> _drawnSource(_BlurSet set) async {
+    final cached = set.drawn;
+    if (cached != null) return cached.clone();
+    final img = await copyImage(set.src);
+    debugDrawnCopies++;
+    if (set.evicted) return img;
+    final again = set.drawn;
+    if (again != null) {
+      img.dispose();
+      return again.clone();
+    }
+    set.drawn = img;
+    return img.clone();
   }
 
   /// A handle the caller disposes: a clone of the cached blur, or the blur

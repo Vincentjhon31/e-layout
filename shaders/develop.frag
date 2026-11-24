@@ -166,13 +166,15 @@ float valueNoise(vec2 p) {
 
 void main() {
   vec2 frag = FlutterFragCoord().xy;
-  // Impeller's OpenGL ES backend reverses the y axis (see ImageFilter.shader
-  // in dart:ui). Flip the position itself so sampling, vignette, grain and
-  // tile origins all agree with the other backends.
-#ifdef IMPELLER_TARGET_OPENGLES
-  frag.y = uSize.y - frag.y;
-#endif
   vec2 uv = frag / uSize;
+  // Impeller's OpenGL ES backend stores images it drew bottom up, and the
+  // photo and its blurs are always drawn images (ShaderDeveloper makes sure),
+  // so reads of them flip on GLES (see ImageFilter.shader in dart:ui). The
+  // position itself (vignette, grain, tile origin) and the colour table,
+  // which is uploaded, are not flipped.
+#ifdef IMPELLER_TARGET_OPENGLES
+  uv.y = 1.0 - uv.y;
+#endif
   vec4 s0 = texture(uSrc, uv);
   float alpha = s0.a;
   vec3 e = alpha > 0.0 ? clamp(s0.rgb / alpha, 0.0, 1.0) : vec3(0.0);
