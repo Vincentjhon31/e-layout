@@ -362,4 +362,77 @@ void main() {
       expect(thin, greaterThan(worst + 3));
     });
   });
+
+  testWidgets('margin stays within kMaxMarginPx with many clarity masks', (
+    t,
+  ) async {
+    await withDev(t, () async {
+      const full = ui.Size(8000, 6000);
+      final global = withMasks([], {Setting.clarity: 100});
+      final s = withMasks(
+        [
+          for (var i = 0; i < 8; i++) radial({Setting.clarity: 100}, id: 'm$i'),
+        ],
+        {Setting.clarity: 100},
+      );
+      final g = dev.margin(global, 1, fullSize: full);
+      final m = dev.margin(s, 1, fullSize: full);
+      // ignore: avoid_print
+      print('8000 px, 8 clarity masks: global $g, capped total $m');
+      expect(kMaxMarginPx, 960);
+      expect(m, lessThanOrEqualTo(kMaxMarginPx));
+      expect(m, greaterThan(g), reason: 'the masks keep some reach');
+      // The global reach is never cut.
+      expect(g, 3 * (0.012 * 8000).ceil() + 2);
+    });
+  });
+
+  testWidgets('tiles still match a whole render when the cap narrows masks', (
+    t,
+  ) async {
+    await withDev(t, () async {
+      final s = withMasks(
+        [
+          radial({Setting.clarity: 80, Setting.exposure: 0.5}, id: 'a'),
+          everywhere({Setting.clarity: -60}, id: 'b'),
+          radial({Setting.clarity: 70, Setting.texture: 50}, id: 'c'),
+        ],
+        {Setting.clarity: 40},
+      );
+      const full = ui.Size(256, 256);
+      final uncapped = dev.margin(s, 1, fullSize: full);
+      dev.debugMaxMarginPx = 40;
+      final m = dev.margin(s, 1, fullSize: full);
+      expect(uncapped, greaterThan(40));
+      expect(m, lessThanOrEqualTo(40));
+      final src = richRgba(5);
+      final whole = await run(dev, src, s);
+      Future<Uint8List> tile(int x0, int w) => run(
+        dev,
+        cropRgba(src, kSide, x0, 0, w, kSide),
+        s,
+        w: w,
+        origin: ui.Offset(x0.toDouble(), 0),
+        fullSize: full,
+      );
+      final a = await tile(0, 128 + m);
+      final b = await tile(128 - m, 128 + m);
+      var worst = 0;
+      for (var y = 0; y < kSide; y++) {
+        for (var x = 0; x < kSide; x++) {
+          final w = (y * kSide + x) * 4;
+          final i = x < 128
+              ? (y * (128 + m) + x) * 4
+              : (y * (128 + m) + x - (128 - m)) * 4;
+          final tl = x < 128 ? a : b;
+          for (var k = 0; k < 3; k++) {
+            worst = math.max(worst, (tl[i + k] - whole[w + k]).abs());
+          }
+        }
+      }
+      // ignore: avoid_print
+      print('capped tiles: margin $m (uncapped $uncapped), max diff $worst');
+      expect(worst, lessThanOrEqualTo(2));
+    });
+  });
 }

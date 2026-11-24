@@ -168,7 +168,8 @@ class _Plan {
   final Map<_Blur, double> sigmas = {};
   double nrLum = 0, nrEps = 1, nrCol = 0;
   double sharpAmt = 0, sharpLimit = 1, sharpMask = 0;
-  late final double texture, clarity, dehaze;
+  // Not final: [narrow] turns them off for a mask with no blur budget left.
+  late double texture, clarity, dehaze;
   late final double vigAmount, vigStart, vigWidth, vigMix, vigPower, vigHigh;
   late final double grainAmt, grainCell, grainRough;
 
@@ -185,6 +186,73 @@ class _Plan {
     }
     return m;
   }
+
+  /// The widest blur sigma in use, 0 without blurs.
+  double get maxSigma => sigmas.values.fold(0.0, math.max);
+
+  /// Narrows every blur by [k] (0 to 1). At 0 the blurs and the effects that
+  /// read them (texture, clarity, dehaze) are off.
+  void narrow(double k) {
+    if (k >= 1) return;
+    if (k <= 0) {
+      sigmas.clear();
+      texture = 0;
+      clarity = 0;
+      dehaze = 0;
+      return;
+    }
+    for (final e in sigmas.keys.toList()) {
+      sigmas[e] = sigmas[e]! * k;
+    }
+  }
+}
+
+/// The largest total blur reach, in render px, that masks may bring the
+/// margin up to: with it, an exported piece (a 64 px step plus the margin on
+/// both sides) stays within 2048 px.
+const int kMaxMarginPx = 960;
+
+/// The main pass's plan, and the plan of each mask with an effect, in order.
+///
+/// A mask's pass blurs the image so far, so the reaches add. When the main
+/// reach plus the masks' would pass [kMaxMarginPx], every mask's blurs
+/// (texture, clarity, dehaze) are narrowed by one factor so the total fits.
+/// The main pass's blurs are never narrowed. This is a rare-case
+/// approximation: it only binds with several clarity masks on very large
+/// photos at full size. [ShaderDeveloper.margin] and
+/// [ShaderDeveloper.develop] both use it, so tiles still match whole renders.
+(_Plan, List<(Mask, _Plan)>) _plans(
+  EditSettings s,
+  double scale,
+  ui.Size full, {
+  int cap = kMaxMarginPx,
+}) {
+  final main = _Plan(s, scale, full);
+  final masks = [
+    for (final m in s.masks)
+      if (m.hasEffect) (m, _Plan(maskSettings(m), scale, full)),
+  ];
+  var total = main.margin;
+  for (final e in masks) {
+    total += e.$2.margin;
+  }
+  if (total > cap) {
+    final blurred = [
+      for (final e in masks)
+        if (e.$2.sigmas.isNotEmpty) e.$2,
+    ];
+    // Each narrowed reach is ceil(3 sigma k) + 2 <= 3 sigma k + 3.
+    final room = cap - main.margin - 3 * blurred.length;
+    var need = 0.0;
+    for (final p in blurred) {
+      need += 3 * p.maxSigma;
+    }
+    final k = room > 0 && need > 0 ? math.min(room / need, 1.0) : 0.0;
+    for (final p in blurred) {
+      p.narrow(k);
+    }
+  }
+  return (main, masks);
 }
 
 /// The blurred copies of one source image at one scale and photo size.
@@ -259,6 +327,11 @@ class ShaderDeveloper implements PhotoDeveloper {
   // Bumped by clearCache, so a coverage drawn across it is not kept.
   int _coverageGen = 0;
 
+  /// The total reach the masks may bring the margin up to; tests lower it
+  /// to see the cap at work on small photos.
+  @visibleForTesting
+  int debugMaxMarginPx = kMaxMarginPx;
+
   /// How many mask coverages this developer has drawn, for tests.
   @visibleForTesting
   int debugCoveragesDrawn = 0;
@@ -281,15 +354,16 @@ class ShaderDeveloper implements PhotoDeveloper {
   ProfileTable? _lutProfile;
 
   /// The main pass's blur reach plus each mask's: a mask's pass blurs the
-  /// main pass's output (and the masks before it), so the reaches add.
+  /// main pass's output (and the masks before it), so the reaches add. The
+  /// masks' share is capped so the total stays within [kMaxMarginPx] (see
+  /// [_plans]); the main pass's own reach is never cut.
   @override
   int margin(EditSettings s, double scale, {required ui.Size fullSize}) {
     assert(scale > 0);
-    var m = _Plan(s, scale, fullSize).margin;
-    for (final mask in s.masks) {
-      if (mask.hasEffect) {
-        m += _Plan(maskSettings(mask), scale, fullSize).margin;
-      }
+    final (main, masks) = _plans(s, scale, fullSize, cap: debugMaxMarginPx);
+    var m = main.margin;
+    for (final e in masks) {
+      m += e.$2.margin;
     }
     return m;
   }
@@ -310,9 +384,11 @@ class ShaderDeveloper implements PhotoDeveloper {
     assert(lutSize >= 2);
     final full =
         fullSize ?? ui.Size(src.width.toDouble(), src.height.toDouble());
+    final (main, masks) = _plans(s, scale, full, cap: debugMaxMarginPx);
     var cur = await _developMain(
       src,
       s,
+      main,
       profile: profile,
       scale: scale,
       origin: origin,
@@ -322,10 +398,10 @@ class ShaderDeveloper implements PhotoDeveloper {
     );
     var done = false;
     try {
-      for (final m in s.masks) {
-        if (!m.hasEffect) continue;
+      for (final (m, plan) in masks) {
         final next = await _applyMask(
           m,
+          plan,
           src: src,
           cur: cur,
           scale: scale,
@@ -348,7 +424,8 @@ class ShaderDeveloper implements PhotoDeveloper {
   /// The global edits: a new drawn image the caller owns.
   Future<ui.Image> _developMain(
     ui.Image src,
-    EditSettings s, {
+    EditSettings s,
+    _Plan plan, {
     required ProfileTable? profile,
     required double scale,
     required ui.Offset origin,
@@ -356,7 +433,6 @@ class ShaderDeveloper implements PhotoDeveloper {
     required int lutSize,
     required DevelopStats? stats,
   }) async {
-    final plan = _Plan(s, scale, full);
     final pipeline = ColorPipeline(s, profile: profile);
     // A profile table acts even on neutral settings, so test the pipeline,
     // not EditSettings.isNeutral.
@@ -473,9 +549,11 @@ class ShaderDeveloper implements PhotoDeveloper {
 
   /// Applies [m] to [cur], the image so far (a drawn image of [src]'s
   /// region): [cur] developed with the mask's settings, mixed back by the
-  /// mask's coverage. A new image; [cur] stays the caller's.
+  /// mask's coverage, with the mask's [plan] from [_plans]. A new image;
+  /// [cur] stays the caller's.
   Future<ui.Image> _applyMask(
-    Mask m, {
+    Mask m,
+    _Plan plan, {
     required ui.Image src,
     required ui.Image cur,
     required double scale,
@@ -486,7 +564,6 @@ class ShaderDeveloper implements PhotoDeveloper {
     required AutoMapsSource? auto,
   }) async {
     final ms = maskSettings(m);
-    final plan = _Plan(ms, scale, full);
     final pipeline = ColorPipeline(ms);
     final blurs = <_Blur, ui.Image>{};
     ui.Image? cov, lut, local;

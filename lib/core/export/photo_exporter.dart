@@ -157,10 +157,12 @@ class PhotoExporter {
       // An edited tile is sent to the developer with its margin on every side,
       // so it steps by less than [tileSize] to keep the whole piece within it.
       // Phones on Impeller's OpenGL ES backend gave back empty (white) tiles
-      // when a piece was over 2048 px on both sides.
+      // when a piece was over 2048 px on both sides. The step goes down to
+      // 64 px, so a margin up to the developer's cap (960 px, kMaxMarginPx)
+      // still fits a 2048 px tile.
       final step = e == null
           ? tileSize
-          : math.max(tileSize ~/ 4, tileSize - 2 * margin);
+          : math.max(math.min(64, tileSize ~/ 4), tileSize - 2 * margin);
       for (var ty = 0; ty < g.h; ty += step) {
         for (var tx = 0; tx < g.w; tx += step) {
           final tw = math.min(step, g.w - tx);
@@ -178,6 +180,11 @@ class PhotoExporter {
                   y0 = math.max(py - margin, 0);
               final x1 = math.min(px + tw + margin, pw),
                   y1 = math.min(py + th + margin, ph);
+              assert(
+                x1 - x0 <= tileSize && y1 - y0 <= tileSize,
+                'piece ${x1 - x0} x ${y1 - y0} is over the $tileSize px tile '
+                '(margin $margin)',
+              );
               final cut = src != null
                   ? await _cutImage(src, x0, y0, x1 - x0, y1 - y0)
                   : await _tileImage(

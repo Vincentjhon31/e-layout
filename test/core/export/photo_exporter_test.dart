@@ -149,6 +149,9 @@ class OutOfMemoryDeveloper implements PhotoDeveloper {
 
 /// Colour through [CpuDeveloper]; records what each tile was given.
 class RecordingDeveloper extends CpuDeveloper {
+  RecordingDeveloper([this.marginPx = 10]);
+
+  final int marginPx;
   final calls = <(ui.Offset, ui.Size?, double, DevelopStats?, int, int)>[];
   int cleared = 0;
 
@@ -167,7 +170,8 @@ class RecordingDeveloper extends CpuDeveloper {
   }
 
   @override
-  int margin(EditSettings s, double scale, {required ui.Size fullSize}) => 10;
+  int margin(EditSettings s, double scale, {required ui.Size fullSize}) =>
+      marginPx;
 
   @override
   void clearCache() => cleared++;
@@ -360,6 +364,23 @@ void main() {
             expect(c.$5, lessThanOrEqualTo(64), reason: 'piece width ${c.$5}');
             expect(c.$6, lessThanOrEqualTo(64), reason: 'piece height ${c.$6}');
           }
+        }
+      });
+    });
+
+    // The developer caps its margin at kMaxMarginPx (960): even then every
+    // piece, margin included, stays within the 2048 px tile.
+    testWidgets('pieces stay within the tile size with a 960 px margin', (tester) async {
+      await tester.runAsync(() async {
+        final dev = RecordingDeveloper(960);
+        final r = await PhotoExporter(forcePixelPath: true, developer: dev).render(
+            photoPng(2200, 100), null, null, const ExportSettings(),
+            edit: edits({Setting.exposure: 0.5}));
+        expect([r.width, r.height], [2200, 100]);
+        expect(dev.calls, isNotEmpty);
+        for (final c in dev.calls) {
+          expect(c.$5, lessThanOrEqualTo(2048), reason: 'piece width ${c.$5}');
+          expect(c.$6, lessThanOrEqualTo(2048), reason: 'piece height ${c.$6}');
         }
       });
     });
