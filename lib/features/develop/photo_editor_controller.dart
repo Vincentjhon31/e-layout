@@ -1,13 +1,14 @@
 import 'package:flutter/foundation.dart';
 
 import '../../core/develop/batch_look.dart';
+import '../../core/develop/masks.dart';
 import '../../core/develop/photo_developer.dart';
 import '../../core/develop/settings.dart';
 import '../../core/presets/preset.dart';
 import '../home/home_controller.dart';
 
 /// The photo editor's tools, in the order of the tool strip.
-enum ToolPanel { presets, light, colour, effects, detail }
+enum ToolPanel { presets, light, colour, effects, detail, masks }
 
 /// Undo keeps at most this many looks.
 const int kEditorHistory = 100;
@@ -32,6 +33,12 @@ class PhotoEditorController extends ChangeNotifier {
   ToolPanel? _panel;
   bool _comparing = false;
   bool _showLayout = true;
+  String? _maskId;
+  bool _showOverlay = false;
+  double _brushSize = 0.05;
+  double _brushFeather = 50;
+  double _brushFlow = 100;
+  bool _brushErase = false;
 
   // The look before the drag, and the look with the dragged values.
   BatchLook? _dragBase;
@@ -171,6 +178,228 @@ class PhotoEditorController extends ChangeNotifier {
   /// Keeps this photo's settings as a preset of the person's own.
   Future<Preset> saveAsPreset(String name) => home.savePreset(name, settings);
 
+  // ---------- masks ----------
+
+  /// This photo's masks, with the change being dragged.
+  List<Mask> get masks => settings.masks;
+
+  /// The mask the panel shows, or null for the list (also when undo took
+  /// the selected mask away).
+  String? get selectedMaskId => selectedMask?.id;
+
+  Mask? get selectedMask => _maskId == null ? null : _find(masks, _maskId!);
+
+  /// True when the canvas shows the selected mask's area in red.
+  bool get showOverlay => _showOverlay;
+
+  /// The brush for new strokes: radius as a fraction of the long edge,
+  /// feather and flow 0 to 100, and whether it erases.
+  double get brushSize => _brushSize;
+  double get brushFeather => _brushFeather;
+  double get brushFlow => _brushFlow;
+  bool get brushErase => _brushErase;
+
+  void selectMask(String? id) {
+    if (id == _maskId) return;
+    _maskId = id;
+    _changed();
+  }
+
+  void setShowOverlay(bool on) {
+    if (on == _showOverlay) return;
+    _showOverlay = on;
+    _changed();
+  }
+
+  void setBrush({double? size, double? feather, double? flow, bool? erase}) {
+    if (size != null) _brushSize = size.clamp(0.005, 0.5).toDouble();
+    if (feather != null) _brushFeather = feather.clamp(0.0, 100.0).toDouble();
+    if (flow != null) _brushFlow = flow.clamp(0.0, 100.0).toDouble();
+    if (erase != null) _brushErase = erase;
+    _changed();
+  }
+
+  /// [look] with this photo's masks replaced by what [edit] makes of them.
+  /// A list equal to the shared one leaves no override behind.
+  BatchLook _withMasks(BatchLook look, List<Mask> Function(List<Mask>) edit) {
+    final id = photo.id;
+    final next = edit(look.settingsFor(id).masks);
+    final shared = look.shared.masks ?? const <Mask>[];
+    if (_sameMasks(next, shared)) {
+      final own = look.photos[id];
+      if (own == null || own.masks == null) return look;
+      final rest = own
+          .without({ToolGroup.masks})
+          .over(SettingsPatch(lensBlur: own.lensBlur));
+      return look.withoutPhoto(id).withPhotoPatch(id, rest);
+    }
+    return look.withPhotoPatch(id, SettingsPatch(masks: next));
+  }
+
+  static bool _sameMasks(List<Mask> a, List<Mask> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  static Mask? _find(List<Mask> list, String id) {
+    for (final m in list) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
+  static List<Mask> _map(List<Mask> list, String id, Mask Function(Mask) f) => [
+    for (final m in list) m.id == id ? f(m) : m,
+  ];
+
+  static Mask _copy(
+    Mask m, {
+    String? name,
+    List<MaskComponent>? components,
+    Map<Setting, double>? adjust,
+    bool? visible,
+  }) => Mask(
+    id: m.id,
+    name: name ?? m.name,
+    components: components ?? m.components,
+    adjust: adjust ?? m.adjust,
+    visible: visible ?? m.visible,
+  );
+
+  /// One undo step that changes mask [id], if it is there and [f] changes
+  /// it (a drag still going is kept first, as its own step).
+  Future<void> _editMask(String id, Mask Function(Mask) f) async {
+    final cur = _find(masks, id);
+    if (cur == null) return;
+    if (!changing && f(cur) == cur) return;
+    await _commit(() => _withMasks(home.look, (l) => _map(l, id, f)));
+  }
+
+  static String _newId(List<Mask> list) {
+    var n = DateTime.now().microsecondsSinceEpoch;
+    String id;
+    do {
+      id = 'm${(n++).toRadixString(36)}';
+    } while (list.any((m) => m.id == id));
+    return id;
+  }
+
+  static String _newName(List<Mask> list) {
+    var k = 1;
+    while (list.any((m) => m.name == 'Mask $k')) {
+      k++;
+    }
+    return 'Mask $k';
+  }
+
+  /// Adds a mask made of [first] and selects it, as one step. A photo has
+  /// at most [kMaxMasks]; more are refused.
+  Future<void> addMask(MaskShape first) async {
+    if (changing) await endChange();
+    final list = masks;
+    if (list.length >= kMaxMasks) return;
+    final m = Mask(
+      id: _newId(list),
+      name: _newName(list),
+      components: [MaskComponent(first)],
+    );
+    _maskId = m.id;
+    await _commit(() => _withMasks(home.look, (l) => [...l, m]));
+  }
+
+  Future<void> deleteMask(String id) async {
+    if (_find(masks, id) == null) return;
+    if (_maskId == id) _maskId = null;
+    await _commit(
+      () => _withMasks(home.look, (l) => [...l.where((m) => m.id != id)]),
+    );
+  }
+
+  /// Renames mask [id]; a blank name keeps the old one.
+  Future<void> renameMask(String id, String name) async {
+    final n = name.trim();
+    if (n.isEmpty) return;
+    await _editMask(id, (m) => _copy(m, name: n));
+  }
+
+  Future<void> setMaskVisible(String id, bool visible) =>
+      _editMask(id, (m) => _copy(m, visible: visible));
+
+  /// Combines [shape] into mask [id] with [op]; at most [kMaxComponents].
+  Future<void> addComponent(String id, MaskShape shape, MaskOp op) async {
+    final m = _find(masks, id);
+    if (m == null || m.components.length >= kMaxComponents) return;
+    await _editMask(
+      id,
+      (m) => _copy(
+        m,
+        components: [
+          ...m.components,
+          MaskComponent(shape, op: op),
+        ],
+      ),
+    );
+  }
+
+  static Mask _withShape(Mask m, int index, MaskShape shape) {
+    if (index < 0 || index >= m.components.length) return m;
+    final comps = [...m.components];
+    comps[index] = MaskComponent(shape, op: comps[index].op);
+    return _copy(m, components: comps);
+  }
+
+  /// Shows [shape] as component [index] of mask [id] without keeping it yet
+  /// (a handle or slider drag; [endChange] keeps it as one step).
+  void previewShape(String id, int index, MaskShape shape) {
+    beginChange();
+    _draft = _withMasks(
+      _look,
+      (l) => _map(l, id, (m) => _withShape(m, index, shape)),
+    );
+    _changed();
+  }
+
+  /// Keeps [shape] as component [index] of mask [id], as one step.
+  Future<void> updateShape(String id, int index, MaskShape shape) =>
+      _editMask(id, (m) => _withShape(m, index, shape));
+
+  /// Removes component [index]; the last one stays (a mask needs a shape).
+  Future<void> removeComponent(String id, int index) async {
+    final m = _find(masks, id);
+    if (m == null || m.components.length < 2) return;
+    if (index < 0 || index >= m.components.length) return;
+    await _editMask(
+      id,
+      (m) => _copy(m, components: [...m.components]..removeAt(index)),
+    );
+  }
+
+  static Mask _withValue(Mask m, Setting s, double v) {
+    if (!kLocalSettings.contains(s)) return m;
+    final adjust = {...m.adjust};
+    final c = s.clamp(v);
+    if (c == s.neutral) {
+      adjust.remove(s);
+    } else {
+      adjust[s] = c;
+    }
+    return _copy(m, adjust: adjust);
+  }
+
+  /// Shows [v] for mask [id]'s local setting [s] without keeping it yet.
+  void previewMaskValue(String id, Setting s, double v) {
+    beginChange();
+    _draft = _withMasks(_look, (l) => _map(l, id, (m) => _withValue(m, s, v)));
+    _changed();
+  }
+
+  /// Keeps [v] for mask [id]'s local setting [s] as one step.
+  Future<void> setMaskValue(String id, Setting s, double v) =>
+      _editMask(id, (m) => _withValue(m, s, v));
+
   // ---------- history ----------
 
   Future<void> undo() async {
@@ -196,6 +425,7 @@ class PhotoEditorController extends ChangeNotifier {
     if (changing) await endChange();
     _openId = list[index].id;
     _comparing = false;
+    _maskId = null;
     developer.clearCache();
     _changed();
   }
