@@ -139,6 +139,10 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   // and pans until every finger is up). Where the first one came down.
   int _pointers = 0;
   bool _multi = false;
+
+  // The touch that just ended had two fingers (kept past the last finger up,
+  // for the tap that may follow); cleared when the next touch starts.
+  bool _hadTwo = false;
   Offset? _downAt;
   MaskDrag? _maskDrag;
 
@@ -381,8 +385,10 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     _pointers++;
     if (_pointers == 1) {
       _downAt = e.localPosition;
+      _hadTwo = false;
       return;
     }
+    _hadTwo = true;
     // A second finger: a pinch, never a mask edit.
     _multi = true;
     final drag = _maskDrag;
@@ -496,10 +502,14 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   }
 
   void _tapUp(TapUpDetails d) {
+    // Two fingers that did not move are not a tap.
+    if (_hadTwo) return;
     if (_lensPoint) {
       // The tap, through the view, so zoom and pan do not matter; taps off
-      // the photo are ignored.
-      final (x, y) = maskView.toNorm(d.localPosition);
+      // the visible photo are ignored.
+      final v = maskView;
+      if (!v.photoRect.contains(d.localPosition)) return;
+      final (x, y) = v.toNorm(d.localPosition);
       if (x < 0 || x > 1 || y < 0 || y > 1) return;
       c.setLens(lensWith(c.lensBlur, fx: x, fy: y));
       return;
@@ -622,7 +632,7 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     if (base == null) return;
     // Only what the coverage depends on is in the key.
     final key =
-        '${p.id}|$_fitSerial|${base.width}x${base.height}|'
+        '${p.id}|${m.id}|$_fitSerial|${base.width}x${base.height}|'
         '${jsonEncode([for (final k in m.components) k.toJson()])}';
     if (key == _overlayKey) return;
     final raster = await (_rasterizer ??= MaskRasterizer.load());

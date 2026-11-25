@@ -10,11 +10,11 @@ import 'copy_sheet.dart';
 import 'develop_canvas.dart';
 import 'filmstrip.dart';
 import 'panels/develop_slider.dart';
+import 'panels/panel_blur.dart';
 import 'panels/panel_colour.dart';
 import 'panels/panel_detail.dart';
 import 'panels/panel_effects.dart';
 import 'panels/panel_light.dart';
-import 'panels/panel_blur.dart';
 import 'panels/panel_masks.dart';
 import 'panels/panel_presets.dart';
 import 'photo_editor_controller.dart';
@@ -27,7 +27,7 @@ import 'select_builder.dart';
 const double kEditorWideWidth = 900;
 
 /// Width of the tool panel on wide windows.
-const double kEditorSidePanel = 360;
+const double kEditorSidePanel = 392;
 
 String toolTitle(ToolPanel p) => switch (p) {
   ToolPanel.presets => 'Presets',

@@ -27,11 +27,16 @@ class Segmented<T extends Object> extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = AppColors.of(context);
-    final style = (compact ? AppText.caption : AppText.subhead).copyWith(color: c.text);
+    final style = (compact ? AppText.caption : AppText.subhead).copyWith(
+      color: c.text,
+    );
     return CupertinoSlidingSegmentedControl<T>(
       groupValue: value,
+      disabledChildren: disabled,
       backgroundColor: c.raised,
-      thumbColor: AppColors.brightnessOf(context) == Brightness.dark ? const Color(0xFF636366) : c.card,
+      thumbColor: AppColors.brightnessOf(context) == Brightness.dark
+          ? const Color(0xFF636366)
+          : c.card,
       padding: const EdgeInsets.all(2),
       onValueChanged: (v) {
         if (v != null && !disabled.contains(v)) onChanged(v);
@@ -39,13 +44,20 @@ class Segmented<T extends Object> extends StatelessWidget {
       children: {
         for (final e in segments.entries)
           e.key: Padding(
-            padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 10, vertical: compact ? 4 : 7),
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 8 : 10,
+              vertical: compact ? 4 : 7,
+            ),
             child: Opacity(
               opacity: disabled.contains(e.key) ? 0.4 : 1,
-              child: Text(e.value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: e.key == value ? style.copyWith(fontWeight: FontWeight.w600) : style),
+              child: Text(
+                e.value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: e.key == value
+                    ? style.copyWith(fontWeight: FontWeight.w600)
+                    : style,
+              ),
             ),
           ),
       },

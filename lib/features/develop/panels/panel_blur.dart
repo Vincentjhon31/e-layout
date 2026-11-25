@@ -59,6 +59,8 @@ class BlurPanel extends StatelessWidget {
       final c = controller;
       final l = c.lensBlur;
       final colors = AppColors.of(context);
+      // Full 44 pt rows where the panel has room (small phones keep them tight).
+      final roomy = PanelSpace.of(context) >= 250;
       return Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -89,7 +91,7 @@ class BlurPanel extends StatelessWidget {
           ),
           if (l.focus == LensFocus.mask) ...[
             const SizedBox(height: 3),
-            _MaskPicker(controller: c),
+            _MaskPicker(controller: c, roomy: roomy),
           ],
           // Tight only when the mask picker needs the room (small phones).
           SizedBox(height: l.focus == LensFocus.mask ? 2 : 8),
@@ -110,7 +112,7 @@ class BlurPanel extends StatelessWidget {
             ),
           ),
           SizedBox(
-            height: 32,
+            height: roomy ? 44 : 32,
             child: Row(
               children: [
                 Expanded(
@@ -137,8 +139,9 @@ class BlurPanel extends StatelessWidget {
 /// The mask that stays sharp: one row that opens the list of masks by name.
 /// A mask that is gone (deleted, or undone away) shows "Choose a mask".
 class _MaskPicker extends StatelessWidget {
-  const _MaskPicker({required this.controller});
+  const _MaskPicker({required this.controller, required this.roomy});
   final PhotoEditorController controller;
+  final bool roomy;
 
   @override
   Widget build(BuildContext context) {
@@ -163,7 +166,7 @@ class _MaskPicker extends StatelessWidget {
         ],
       ),
       child: Container(
-        height: 34,
+        height: roomy ? 44 : 34,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: colors.raised,

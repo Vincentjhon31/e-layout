@@ -412,6 +412,8 @@ Future<void> tapMask(
   if (m == null || m.components.isEmpty) return;
   final i = c.selectedComponent;
   final s = m.components[i].shape;
+  // Only the visible photo (a layout may crop it).
+  if (!v.photoRect.contains(p)) return;
   final (x, y) = v.toNorm(p);
   if (x < 0 || x > 1 || y < 0 || y > 1) return;
   switch (s) {

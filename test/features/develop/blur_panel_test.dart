@@ -296,14 +296,62 @@ void main() {
         tester,
         () => e.setLens(LensBlur(amount: 50, focus: LensFocus.point)),
       );
-      final g = await tester.startGesture(screenAt(tester, .5, .5));
+      final g = await tester.startGesture(screenAt(tester, .3, .7));
       await tester.pump(const Duration(milliseconds: 700));
       expect(e.comparing, isTrue);
       await g.up();
       await tester.pump();
       expect(e.comparing, isFalse);
       expect(e.settings.lensBlur.fx, .5);
+      expect(e.settings.lensBlur.fy, .5);
       await settle(tester);
+    });
+
+    etest('two fingers down and up without moving do not move the focus', (
+      tester,
+    ) async {
+      final e = await openBlurQuad(tester);
+      await run(
+        tester,
+        () => e.setLens(LensBlur(amount: 50, focus: LensFocus.point)),
+      );
+      final c = screenAt(tester, .3, .7);
+      final a = await tester.startGesture(c - const Offset(15, 0));
+      final b = await tester.startGesture(c + const Offset(15, 0));
+      await a.up();
+      await b.up();
+      await tester.pump();
+      await settle(tester);
+      expect(e.settings.lensBlur.fx, .5);
+      expect(e.settings.lensBlur.fy, .5);
+      // A single tap right after still works.
+      await tapAt(tester, c);
+      expect(e.settings.lensBlur.fx, closeTo(.3, 0.01));
+    });
+
+    etest('a Subject mask and the Subject focus each show their overlay', (
+      tester,
+    ) async {
+      final e = await openBlurQuad(tester);
+      final canvas = canvasState(tester);
+      await run(tester, () => e.addMask(const SubjectShape()));
+      e.setPanel(ToolPanel.masks);
+      e.setShowOverlay(true);
+      await tester.pump();
+      await settle(tester, until: () => canvas.showsMaskOverlay);
+
+      await run(tester, () => e.setLens(LensBlur(amount: 50)));
+      e.setPanel(ToolPanel.blur);
+      e.setShowFocus(true);
+      await tester.pump();
+      await settle(tester, until: () => canvas.showsFocusOverlay);
+      expect(canvas.showsFocusOverlay, isTrue, reason: 'green, same shape');
+
+      e.setShowFocus(false);
+      e.setPanel(ToolPanel.masks);
+      await tester.pump();
+      await settle(tester, until: () => canvas.showsMaskOverlay);
+      expect(canvas.showsMaskOverlay, isTrue, reason: 'red is back');
     });
 
     etest('Show focus draws for a mask and for a point', (tester) async {
