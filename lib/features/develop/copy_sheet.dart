@@ -14,9 +14,10 @@ const Map<ToolGroup, String> _kGroupNames = {
   ToolGroup.colour: 'Colour',
   ToolGroup.effects: 'Effects',
   ToolGroup.detail: 'Detail',
+  ToolGroup.masks: 'Masks & blur',
 };
 
-/// The groups the sheet offers. Masks get their checkbox in a later task.
+/// The groups the sheet offers. Masks & blur start unchecked.
 final List<ToolGroup> _kSheetGroups = [
   for (final g in ToolGroup.values)
     if (_kGroupNames.containsKey(g)) g,
@@ -59,7 +60,10 @@ class CopyToAllSheet extends StatefulWidget {
 }
 
 class _CopyToAllSheetState extends State<CopyToAllSheet> {
-  final Set<ToolGroup> _groups = _kSheetGroups.toSet();
+  final Set<ToolGroup> _groups = {
+    for (final g in _kSheetGroups)
+      if (g != ToolGroup.masks) g,
+  };
   bool _keepSingle = true;
 
   @override

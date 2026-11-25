@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pio_photo_layout/core/develop/masks.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
 import 'package:pio_photo_layout/core/presets/preset.dart';
 import 'package:pio_photo_layout/features/develop/copy_sheet.dart';
@@ -203,9 +204,21 @@ void main() {
     ) async {
       await sheet(tester);
       expect(find.text('Copy to all photos'), findsOneWidget);
-      for (final t in ['Light', 'Colour', 'Effects', 'Detail']) {
+      for (final t in [
+        'Light',
+        'Colour',
+        'Effects',
+        'Detail',
+        'Masks & blur',
+      ]) {
         expect(inSheet(CopyToAllSheet, find.text(t)), findsOneWidget);
       }
+      // Masks & blur starts unchecked; the other four are checked.
+      expect(
+        find.byIcon(CupertinoIcons.checkmark_circle_fill),
+        findsNWidgets(4),
+      );
+      expect(find.byIcon(CupertinoIcons.circle), findsOneWidget);
       expect(find.text('Keep changes made on single photos'), findsOneWidget);
       expect(
         tester.widget<CupertinoSwitch>(find.byType(CupertinoSwitch)).value,
@@ -261,6 +274,80 @@ void main() {
       await tester.tap(find.byIcon(CupertinoIcons.arrow_uturn_left));
       await tester.pump();
       await waitFor(tester, () => e.home.settingsFor(b)[Setting.exposure] == 0);
+    });
+
+    etest('Masks & blur is copied only when checked', (tester) async {
+      final home = await homeWith(tester, n: 3);
+      final [a, b, _] = home.readyPhotos;
+      final mask = Mask(
+        id: 'm1',
+        components: const [MaskComponent(SubjectShape())],
+        adjust: {Setting.exposure: 0.5},
+      );
+      await tester.runAsync(
+        () => home.setLook(
+          home.look.withPhotoPatch(
+            a.id,
+            SettingsPatch(masks: [mask], lensBlur: LensBlur(amount: 40)),
+          ),
+        ),
+      );
+      final e = editorOn(home, 0);
+      await pumpEditor(tester, e);
+      await tester.runAsync(() => e.setValue(Setting.exposure, 1));
+      await settle(tester);
+      await openMenu(tester);
+      await tester.tap(find.text('Copy to all'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Copy to 2 photos'));
+      await tester.pump();
+      await waitFor(tester, () => home.settingsFor(b)[Setting.exposure] == 1);
+      expect(home.settingsFor(b).masks, isEmpty);
+      expect(home.settingsFor(b).lensBlur.isOn, isFalse);
+      await tester.pump(const Duration(seconds: 1));
+      hideToast();
+      await openMenu(tester);
+      await tester.tap(find.text('Copy to all'));
+      await tester.pumpAndSettle();
+      await tester.tap(inSheet(CopyToAllSheet, find.text('Masks & blur')));
+      await tester.pump();
+      await tester.tap(find.text('Copy to 2 photos'));
+      await tester.pump();
+      await waitFor(tester, () => home.settingsFor(b).masks.isNotEmpty);
+      expect(home.settingsFor(b).masks.single.id, 'm1');
+      expect(home.settingsFor(b).lensBlur.amount, 40);
+      await tester.pump(const Duration(seconds: 1));
+      hideToast();
+    });
+
+    etest('saving a preset drops masks and lens blur', (tester) async {
+      final home = await homeWith(tester, n: 2);
+      final a = home.readyPhotos.first;
+      await tester.runAsync(
+        () => home.setLook(
+          home.look.withPhotoPatch(
+            a.id,
+            SettingsPatch(
+              values: {Setting.exposure: 0.4},
+              masks: [
+                Mask(
+                  id: 'm1',
+                  components: const [MaskComponent(SubjectShape())],
+                  adjust: {Setting.exposure: 1},
+                ),
+              ],
+              lensBlur: LensBlur(amount: 30),
+            ),
+          ),
+        ),
+      );
+      final e = editorOn(home, 0);
+      await pumpEditor(tester, e);
+      final p = (await tester.runAsync(() => e.saveAsPreset('Mine')))!;
+      expect(p.patch.values[Setting.exposure], 0.4);
+      expect(p.patch.masks, isNull);
+      expect(p.patch.lensBlur, isNull);
+      expect(home.presets.last.patch.masks, isNull);
     });
 
     etest('the switch decides if single changes stay', (tester) async {

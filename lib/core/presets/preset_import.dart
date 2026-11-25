@@ -349,7 +349,7 @@ ImportResult importPresetFiles(
         name: (p.name ?? '').isEmpty ? _stem(f.fileName) : p.name!,
         kind: PresetKind.imported,
         created: now,
-        patch: patch,
+        patch: patch.without({ToolGroup.masks}),
       ),
     );
   }
@@ -367,7 +367,7 @@ ImportResult importPresetFiles(
         name: sp.name,
         kind: PresetKind.imported,
         created: now,
-        patch: sp.patch,
+        patch: sp.patch.without({ToolGroup.masks}),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pio_photo_layout/core/develop/batch_look.dart';
+import 'package:pio_photo_layout/core/develop/masks.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
 
 void main() {
@@ -174,5 +175,55 @@ void main() {
     });
     expect(look.sharedName, 'Old');
     expect(look.sharedId, isNull);
+  });
+
+  group('copying masks and blur', () {
+    final mask = Mask(
+      id: 'm1',
+      components: const [MaskComponent(SubjectShape())],
+      adjust: {Setting.exposure: 0.5},
+    );
+    final other = Mask(
+      id: 'm9',
+      components: const [MaskComponent(SkyShape())],
+      adjust: {Setting.contrast: 10},
+    );
+    BatchLook base() => const BatchLook()
+        .withPhotoPatch(
+          1,
+          SettingsPatch(masks: [mask], lensBlur: LensBlur(amount: 40)),
+        )
+        .withPhotoPatch(2, SettingsPatch(masks: [other]));
+
+    test('without the masks group, other photos keep theirs', () {
+      final look = base().copyToAll(1, {
+        ToolGroup.light,
+        ToolGroup.colour,
+        ToolGroup.effects,
+        ToolGroup.detail,
+      }, keepSingle: true);
+      expect(look.settingsFor(2).masks.map((m) => m.id), ['m9']);
+      expect(look.settingsFor(3).masks, isEmpty);
+      expect(look.settingsFor(3).lensBlur.isOn, isFalse);
+      final off = base().copyToAll(1, {ToolGroup.light}, keepSingle: false);
+      expect(off.settingsFor(2).masks.map((m) => m.id), ['m9']);
+      expect(off.settingsFor(1).masks.map((m) => m.id), ['m1']);
+    });
+
+    test('with the masks group, others get the source masks and blur', () {
+      final look = base().copyToAll(1, {ToolGroup.masks}, keepSingle: false);
+      for (final id in [1, 2, 3]) {
+        final s = look.settingsFor(id);
+        expect(s.masks.map((m) => m.id), ['m1'], reason: 'photo $id');
+        expect(s.masks.single.adjust, {Setting.exposure: 0.5});
+        expect(s.lensBlur.amount, 40);
+      }
+    });
+
+    test('copying an empty mask list clears the others', () {
+      final look = base().copyToAll(3, {ToolGroup.masks}, keepSingle: false);
+      expect(look.settingsFor(2).masks, isEmpty);
+      expect(look.settingsFor(1).masks, isEmpty);
+    });
   });
 }

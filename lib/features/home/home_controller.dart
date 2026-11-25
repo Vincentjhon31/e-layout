@@ -944,7 +944,9 @@ class HomeController extends ChangeNotifier {
       name: name,
       kind: PresetKind.user,
       created: DateTime.now(),
-      patch: s.toPatch(),
+      patch: s.toPatch().without({
+        ToolGroup.masks,
+      }), // presets never carry masks
     );
     await _keepPreset(p);
     _changed();

@@ -1,8 +1,10 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pio_photo_layout/core/develop/masks.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
 import 'package:pio_photo_layout/core/presets/preset.dart';
+import 'package:pio_photo_layout/core/presets/preset_codec.dart';
 import 'package:pio_photo_layout/core/presets/preset_import.dart';
 
 import 'fixtures.dart';
@@ -531,5 +533,30 @@ void main() {
         CurvePoint(255, 250),
       ]);
     });
+  });
+
+  test('a shared preset file loses its masks and lens blur', () {
+    final p = Preset(
+      id: 'shared-1',
+      name: 'With masks',
+      kind: PresetKind.user,
+      created: DateTime.utc(2026),
+      patch: SettingsPatch(
+        values: {Setting.exposure: 0.5},
+        masks: [
+          Mask(
+            id: 'm1',
+            components: const [MaskComponent(SubjectShape())],
+            adjust: {Setting.exposure: 1},
+          ),
+        ],
+        lensBlur: LensBlur(amount: 50),
+      ),
+    );
+    final r = importPresetFiles([('x.preset.json', encodePresetFile(p, null))]);
+    final got = r.presets.single.patch;
+    expect(got.values[Setting.exposure], 0.5);
+    expect(got.masks, isNull);
+    expect(got.lensBlur, isNull);
   });
 }
