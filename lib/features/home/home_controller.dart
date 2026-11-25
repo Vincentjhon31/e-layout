@@ -761,7 +761,7 @@ class HomeController extends ChangeNotifier {
     final entry = _MapsEntry();
     entry.future = () async {
       try {
-        final maps = await computeAutoMaps(copy);
+        final maps = await (computeAutoMapsOverride ?? computeAutoMaps)(copy);
         if (entry.freed) {
           maps.dispose();
           return null;
@@ -779,6 +779,10 @@ class HomeController extends ChangeNotifier {
     _autoMaps[p.id] = entry;
     return entry;
   }
+
+  /// Replaces [computeAutoMaps], for tests (such as one that always fails).
+  @visibleForTesting
+  Future<AutoMaps> Function(ui.Image photo)? computeAutoMapsOverride;
 
   /// The cached original of [p]'s maps, for tests (never dispose it).
   @visibleForTesting

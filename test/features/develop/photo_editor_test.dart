@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pio_photo_layout/core/develop/mask_raster.dart';
+import 'package:pio_photo_layout/core/develop/masks.dart';
 import 'package:pio_photo_layout/core/develop/photo_developer.dart';
 import 'package:pio_photo_layout/core/develop/profile_table.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
@@ -661,6 +662,50 @@ void main() {
         .map((w) => w.painter)
         .whereType<CompositePainter>();
     expect(painters.map((x) => x.image), contains(same(p.developed)));
+  });
+
+  // Maps that always fail are tried again only when the settings change, not
+  // on every frame (the canvas keeps its keys; Home drops the failure).
+  etest('failing automatic maps are not retried on every frame', (
+    tester,
+  ) async {
+    final c = await homeWith(tester, n: 1);
+    var attempts = 0;
+    c.computeAutoMapsOverride = (_) async {
+      attempts++;
+      throw StateError('no maps');
+    };
+    final p = c.readyPhotos.single;
+    await tester.runAsync(() async {
+      await c.setLook(
+        c.look.withPhotoPatch(
+          p.id,
+          SettingsPatch(
+            masks: [
+              Mask(
+                id: 'sky',
+                components: [const MaskComponent(SkyShape())],
+                adjust: {Setting.exposure: 0.5},
+              ),
+            ],
+          ),
+        ),
+      );
+      await c.whenIdle();
+    });
+    expect(attempts, 1, reason: 'the thumbnail tried once');
+    attempts = 0;
+    final e = editorOn(c, 0);
+    await pumpEditor(tester, e);
+    for (var i = 0; i < 10; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 15)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(attempts, greaterThan(0), reason: 'the canvas tried');
+    expect(attempts, lessThanOrEqualTo(1), reason: 'not once per frame');
+    await settle(tester);
   });
 
   group('goldens', () {

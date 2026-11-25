@@ -420,13 +420,12 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     final devKey = '$fitKey|$look|${s.isNeutral ? 0 : lut}';
     if (_shownKey != devKey) {
       ui.Image? out;
-      // False when the automatic maps were needed but did not come: the
-      // result is shown but not kept as done, so a later render tries again.
-      var complete = true;
       if (!s.isNeutral) {
         final stats = await _statsFor(p, s);
+        // Null when the maps could not be computed: the render is kept as
+        // done all the same, so a failure is tried again only when the
+        // settings change (Home does not cache the failure).
         final auto = await c.home.autoMapsFor(p, s);
-        complete = auto != null || !needsAutoMaps(s);
         try {
           out = await c.developer.develop(
             fit,
@@ -448,7 +447,7 @@ class DevelopCanvasState extends State<DevelopCanvas> {
       }
       _shown?.dispose();
       _shown = out;
-      _shownKey = complete ? devKey : null;
+      _shownKey = devKey;
       _shownId = p.id;
       _update();
       if (c.photo.id != p.id ||
@@ -572,13 +571,11 @@ class DevelopCanvasState extends State<DevelopCanvas> {
       ),
     );
     var out = crop;
-    // As in _work: without the maps it needed, the tile is not kept as done.
-    var complete = true;
     if (!s.isNeutral) {
       try {
         final stats = await _statsFor(p, s);
+        // As in _work: a tile made without maps that failed is kept too.
         final auto = await c.home.autoMapsFor(p, s);
-        complete = auto != null || !needsAutoMaps(s);
         try {
           out = await c.developer.develop(
             crop,
@@ -603,11 +600,9 @@ class DevelopCanvasState extends State<DevelopCanvas> {
       return;
     }
     _tile?.image.dispose();
-    _tile = _Tile(out, p.id, outer, inner, ts, complete ? key : '', look);
+    _tile = _Tile(out, p.id, outer, inner, ts, key, look);
     _update();
-    // The view may have moved meanwhile. An incomplete tile waits for the
-    // next render instead, so a failing computation is not retried in a loop.
-    if (complete) _again = true;
+    _again = true; // the view may have moved meanwhile
   }
 
   /// The tile, when it belongs on screen now.
