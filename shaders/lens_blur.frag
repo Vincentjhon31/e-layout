@@ -19,8 +19,8 @@ precision highp float;
 //    the largest radius), by 0.128 x radius / sigma: large discs are filled,
 //    not offset copies, and small ones stay crisp. The prefilter is an
 //    8-bit Gaussian of the encoded colour weighted by (1 - focus) and
-//    Boost, so a small highlight loses some of its light at large radii
-//    unless Boost is up;
+//    Boost (capped at 2x there, against banding), so a small highlight
+//    loses some of its light at large radii;
 //  - the transition is an exponent on the focus, (1 - focus)^(1 + t/50),
 //    not a distance ramp from the focus edge;
 //  - colours are averaged in linear light, but the image is the developed,
@@ -96,13 +96,17 @@ void main() {
   vec4 c0 = texture(uSrc, uvOf(p));
   float f0 = clamp(texture(uFocus, uvOf(p)).a, 0.0, 1.0);
   vec3 s0 = c0.a > 0.0 ? c0.rgb / c0.a : vec3(0.0);
-  // The largest Boost weight, so the prefilter's weights fit in 0..1.
-  float gmax = 1.0 + uBoost;
+  // The prefilter's largest Boost weight. Its weights are stored over gmax
+  // in 8-bit alpha, so gmax is capped at 2: at least 128 steps for an
+  // unboosted pixel, no visible bands. The taps' own weights keep the full
+  // Boost.
+  float gmax = min(1.0 + uBoost, 2.0);
   if (uMode > 0.5) {
     // The prefilter's input: each pixel premultiplied by its weight, how far
-    // out of focus it is times its Boost weight (over gmax). Blurred, its
-    // rgb / a is the weighted mean colour and a x gmax the mean weight.
-    float wt = (1.0 - f0) * gain(s0) / gmax * c0.a;
+    // out of focus it is times its Boost weight capped at gmax (over gmax).
+    // Blurred, its rgb / a is the weighted mean colour and a x gmax the mean
+    // weight.
+    float wt = (1.0 - f0) * min(gain(s0), gmax) / gmax * c0.a;
     fragColor = vec4(s0 * wt, wt);
     return;
   }

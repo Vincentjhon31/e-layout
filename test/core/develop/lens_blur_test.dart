@@ -129,8 +129,6 @@ void main() {
       for (final (x0, y0, x1, y1) in corners) {
         final a = variance(src, x0, y0, x1, y1);
         final b = variance(out, x0, y0, x1, y1);
-        // ignore: avoid_print
-        print('corner ($x0, $y0): variance $a -> $b');
         expect(b, lessThan(0.4 * a), reason: 'corner ($x0, $y0)');
       }
     });
@@ -152,8 +150,6 @@ void main() {
       final boosted = await at(100);
       final mPlain = mean(plain, 18, 18, 31, 31);
       final mBoost = mean(boosted, 18, 18, 31, 31);
-      // ignore: avoid_print
-      print('dot spread: boost 0 $mPlain, boost 100 $mBoost');
       expect(mBoost, greaterThan(mPlain + 10));
       // Away from highlights, boost changes nothing.
       expect(mean(boosted, 200, 200, 230, 230), closeTo(60, 1));
@@ -202,18 +198,113 @@ void main() {
       final (mean, cv) = await disc();
       dev.debugLensPrefilter = false;
       final (rawMean, rawCv) = await disc();
-      // ignore: avoid_print
-      print(
-        'spot at R 80: prefilter mean $mean cv $cv; '
-        'taps only mean $rawMean cv $rawCv',
+      // The prefilter caps Boost at 2x (against banding), so the disc is
+      // dimmer than the taps' alone, but plainly lit.
+      expect(mean, greaterThan(3), reason: 'the disc is lit');
+      expect(mean, lessThanOrEqualTo(rawMean + 1));
+      expect(cv, lessThan(0.5), reason: 'the disc is filled');
+      expect(cv, lessThan(rawCv / 3), reason: 'the taps alone leave dots');
+    });
+  });
+
+  testWidgets('a smooth gradient stays smooth at Boost 100', (t) async {
+    await withDev(t, () async {
+      // A 256 px region of a 1000 px photo, all out of focus: radius 20 px,
+      // prefilter sigma 2.6 px. A gentle bright ramp (200 to 215), so Boost
+      // weighs in and 8-bit bands in the prefilter's weights would show as
+      // steps, dips or a drift from the taps alone.
+      const full = ui.Size(1000, 1000);
+      const origin = ui.Offset(372, 372);
+      final src = fillRgba(kSide, kSide, (x, y) {
+        final v = (200 + 15 * x / 255).round();
+        return (v, v, v);
+      });
+      final s = lensOn(
+        LensBlur(amount: 100, focus: LensFocus.point, fx: 0, fy: 0, boost: 100),
       );
-      expect(
-        mean,
-        greaterThan(rawMean / 2),
-        reason: 'the disc keeps its light',
+      final out = await run(dev, src, s, origin: origin, fullSize: full);
+      dev.debugLensPrefilter = false;
+      final taps = await run(dev, src, s, origin: origin, fullSize: full);
+      var step = 0, falls = 0, drift = 0;
+      for (var y = 64; y < 192; y++) {
+        for (var x = 1; x < kSide; x++) {
+          final i = (y * kSide + x) * 4;
+          for (var k = 0; k < 3; k++) {
+            final d = out[i + k] - out[i - 4 + k];
+            step = math.max(step, d.abs());
+            if (d < 0) falls++;
+            drift = math.max(drift, (out[i + k] - taps[i + k]).abs());
+          }
+        }
+      }
+      expect(step, lessThanOrEqualTo(2), reason: 'no step past 2 levels');
+      expect(falls, 0, reason: 'the ramp only rises');
+      expect(drift, lessThanOrEqualTo(1), reason: 'no drift from the taps');
+    });
+  });
+
+  testWidgets('two tiles match a whole render with a large prefilter', (
+    t,
+  ) async {
+    await withDev(t, () async {
+      // A 2048 x 256 photo: radius 2 % of 2048 = 41 px, prefilter sigma
+      // about 5.3 px. Focus far left, transition 0: all blurred at the cut.
+      const fw = 2048, fh = 256, cut = 1024;
+      final rnd = math.Random(8);
+      final src = fillRgba(fw, fh, (x, y) {
+        final chk = (x ~/ 9 + y ~/ 9).isEven ? 50 : -50;
+        final n = rnd.nextInt(31) - 15;
+        final hi = (x % 97 < 3 && y % 61 < 3) ? 120 : 0;
+        return (
+          90 + chk + n + hi,
+          100 + y ~/ 4 + chk + n + hi,
+          140 - x ~/ 32 + n + hi,
+        );
+      });
+      final s = lensOn(
+        LensBlur(
+          amount: 100,
+          focus: LensFocus.point,
+          fx: .05,
+          transition: 0,
+          boost: 60,
+        ),
       );
-      expect(cv, lessThan(0.35), reason: 'the disc is filled');
-      expect(cv, lessThan(rawCv / 4), reason: 'the taps alone leave dots');
+      const full = ui.Size(2048, 256);
+      final m = dev.margin(s, 1, fullSize: full);
+      expect(m, (0.02 * 2048 * 1.39).ceil() + 2);
+      final whole = await run(dev, src, s, w: fw);
+      Future<Uint8List> tile(int x0, int w) => run(
+        dev,
+        cropRgba(src, fw, x0, 0, w, fh),
+        s,
+        w: w,
+        origin: ui.Offset(x0.toDouble(), 0),
+        fullSize: full,
+      );
+      Future<int> seamDiff(int mm) async {
+        final a = await tile(0, cut + mm);
+        final b = await tile(cut - mm, fw - cut + mm);
+        var worst = 0;
+        for (var y = 0; y < fh; y++) {
+          for (var x = cut - 160; x < cut + 160; x++) {
+            final wi = (y * fw + x) * 4;
+            final i = x < cut
+                ? (y * (cut + mm) + x) * 4
+                : (y * (fw - cut + mm) + x - (cut - mm)) * 4;
+            final tl = x < cut ? a : b;
+            for (var k = 0; k < 3; k++) {
+              worst = math.max(worst, (tl[i + k] - whole[wi + k]).abs());
+            }
+          }
+        }
+        return worst;
+      }
+
+      final worst = await seamDiff(m);
+      expect(worst, lessThanOrEqualTo(2));
+      // Control: a 1 px overlap is not enough.
+      expect(await seamDiff(1), greaterThan(worst + 3));
     });
   });
 
@@ -268,8 +359,6 @@ void main() {
 
       final worst = await seamDiff(m);
       final thin = await seamDiff(1);
-      // ignore: avoid_print
-      print('lens tiles: margin $m, max diff $worst levels; 1 px: $thin');
       expect(worst, lessThanOrEqualTo(2));
       expect(thin, greaterThan(worst + 3));
     });
@@ -388,8 +477,6 @@ void main() {
         1,
         fullSize: full,
       );
-      // ignore: avoid_print
-      print('8000 px: global $g, lens $lensOnly, all $all');
       expect(all, lessThanOrEqualTo(kMaxMarginPx));
       expect(all, greaterThan(g + lensOnly), reason: 'masks keep some reach');
 
