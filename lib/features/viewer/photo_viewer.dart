@@ -400,15 +400,17 @@ class _ViewerPageState extends State<_ViewerPage> {
     }
     _developing = true;
     ui.Image? out;
+    // Our own handle: the viewer may close while the auto maps come.
+    final own = img.clone();
     try {
       final auto = await home.autoMapsFor(photo);
       try {
         out = await dev.develop(
-          img,
+          own,
           s,
           profile: profile,
-          scale: img.width / photo.width,
-          fullSize: Size(img.width.toDouble(), img.height.toDouble()),
+          scale: own.width / photo.width,
+          fullSize: Size(own.width.toDouble(), own.height.toDouble()),
           lutSize: 33,
           auto: auto,
         );
@@ -418,6 +420,7 @@ class _ViewerPageState extends State<_ViewerPage> {
     } catch (_) {
       // The undeveloped image stays.
     } finally {
+      own.dispose();
       _developing = false;
     }
     if (_disposed) {

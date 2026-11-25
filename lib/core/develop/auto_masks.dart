@@ -21,11 +21,16 @@ const int kAutoMapEdge = 384;
 /// white with coverage 0 to 1 in its alpha. The masks stretch it over the
 /// photo. [subjectPoint] is the likely subject, normalised to the photo.
 class AutoMaps implements AutoMapsSource {
+  /// New maps get a new [generation]; only [clone] passes one on.
   AutoMaps({
     required this.subject,
     required this.sky,
     required this.subjectPoint,
-  });
+  }) : generation = ++_lastGeneration;
+
+  AutoMaps._clone(this.subject, this.sky, this.subjectPoint, this.generation);
+
+  static int _lastGeneration = 0;
 
   @override
   final ui.Image subject;
@@ -33,13 +38,16 @@ class AutoMaps implements AutoMapsSource {
   final ui.Image sky;
   final (double, double) subjectPoint;
 
+  /// Which computation these maps came from: shared by every clone, new for
+  /// maps computed again (another photo, or a retry after a failure). The
+  /// developer's coverage cache matches on it, since Home hands out a fresh
+  /// clone per render.
+  final int generation;
+
   /// New handles to the same maps (the textures are shared until every
   /// handle is disposed). The caller disposes the clone.
-  AutoMaps clone() => AutoMaps(
-    subject: subject.clone(),
-    sky: sky.clone(),
-    subjectPoint: subjectPoint,
-  );
+  AutoMaps clone() =>
+      AutoMaps._clone(subject.clone(), sky.clone(), subjectPoint, generation);
 
   void dispose() {
     subject.dispose();

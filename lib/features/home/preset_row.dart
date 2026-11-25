@@ -5,11 +5,12 @@ import '../../ui/app_theme.dart';
 import '../../ui/widgets/pressable.dart';
 
 /// What the preset row shows for [look]: the shared preset's name, "Custom"
-/// for a shared look without a name, or "None".
+/// for a shared look without a name, or "None" (shared masks and lens blur
+/// are no preset).
 String presetRowValue(BatchLook look) {
   final name = look.sharedName;
   if (name != null) return name;
-  return look.shared.isEmpty ? 'None' : 'Custom';
+  return look.sharedPresetIsEmpty ? 'None' : 'Custom';
 }
 
 /// "Preset", the current look at the right, and a chevron. Opens the picker.

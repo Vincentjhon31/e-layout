@@ -61,6 +61,9 @@ class BlurPanel extends StatelessWidget {
       final colors = AppColors.of(context);
       // Full 44 pt rows where the panel has room (small phones keep them tight).
       final roomy = PanelSpace.of(context) >= 250;
+      final hint =
+          l.focus == LensFocus.mask &&
+          !c.masks.any((m) => m.id == l.maskId && m.components.isNotEmpty);
       return Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -92,9 +95,11 @@ class BlurPanel extends StatelessWidget {
           if (l.focus == LensFocus.mask) ...[
             const SizedBox(height: 3),
             _MaskPicker(controller: c, roomy: roomy),
+            // The render keeps the subject sharp without a usable mask.
+            if (hint) const _FocusHint(),
           ],
           // Tight only when the mask picker needs the room (small phones).
-          SizedBox(height: l.focus == LensFocus.mask ? 2 : 8),
+          SizedBox(height: l.focus == LensFocus.mask ? (hint ? 0 : 2) : 8),
           SliderPair(
             left: _slider(
               'slider-lens-transition',
@@ -133,6 +138,24 @@ class BlurPanel extends StatelessWidget {
         ],
       );
     },
+  );
+}
+
+/// Under the mask picker while no mask is chosen: what the render does
+/// meanwhile. Tight lines, so the panel still fits.
+class _FocusHint extends StatelessWidget {
+  const _FocusHint();
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 2),
+    child: Text(
+      'Until you choose one, the subject stays sharp.',
+      style: AppText.caption.copyWith(
+        color: AppColors.of(context).secondary,
+        height: 1.1,
+      ),
+    ),
   );
 }
 

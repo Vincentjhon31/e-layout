@@ -127,6 +127,27 @@ void main() {
     });
   });
 
+  testWidgets('clones share the generation; a new computation does not', (
+    t,
+  ) async {
+    await t.runAsync(() async {
+      final photo = await imageFromRgba(
+        fillRgba(8, 8, (x, y) => (10, 20, 30)),
+        8,
+        8,
+      );
+      final a = await computeAutoMaps(photo);
+      final b = await computeAutoMaps(photo);
+      final c = a.clone();
+      expect(c.generation, a.generation);
+      expect(b.generation, isNot(a.generation));
+      for (final m in [a, b, c]) {
+        m.dispose();
+      }
+      photo.dispose();
+    });
+  });
+
   testWidgets('AutoMaps is an AutoMapsSource', (t) async {
     await t.runAsync(() async {
       final photo = await imageFromRgba(

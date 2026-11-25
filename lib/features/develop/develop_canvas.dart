@@ -50,6 +50,51 @@ Future<ui.Image> decodeFull(Uint8List bytes) async {
   }
 }
 
+/// The editor's full-size piece: [inner] (photo pixels) is the part shown,
+/// [outer] adds the developer's [margin] (tile pixels at [scale]) on every
+/// side, inside the [photo], and [width] x [height] is the piece's size in
+/// tile pixels.
+///
+/// The tile rule: the piece is at most [maxPx] a side, so [inner] is the
+/// [visible] part cut down around [centre] when the margin needs the room.
+/// The rest of the view keeps showing the fitted copy underneath. Null when
+/// the margin alone fills the piece.
+@visibleForTesting
+({Rect inner, Rect outer, int width, int height})? tilePiece({
+  required Rect visible,
+  required Offset centre,
+  required int margin,
+  required double scale,
+  required Size photo,
+  int maxPx = 2048,
+}) {
+  final mp = (margin / scale).ceilToDouble();
+  // The most photo pixels a side that fit with the margin on both sides.
+  final most = (maxPx / scale).floorToDouble() - 2 * mp;
+  if (most < 1) return null;
+  (double, double) cut(double lo, double hi, double c) {
+    if (hi - lo <= most) return (lo, hi);
+    final a = (c - most / 2).floorToDouble().clamp(lo, hi - most);
+    return (a, a + most);
+  }
+
+  final (l, r) = cut(visible.left, visible.right, centre.dx);
+  final (t, b) = cut(visible.top, visible.bottom, centre.dy);
+  final inner = Rect.fromLTRB(l, t, r, b);
+  final outer = Rect.fromLTRB(
+    math.max(0, inner.left - mp),
+    math.max(0, inner.top - mp),
+    math.min(photo.width, inner.right + mp),
+    math.min(photo.height, inner.bottom + mp),
+  );
+  return (
+    inner: inner,
+    outer: outer,
+    width: math.max(1, (outer.width * scale).round()),
+    height: math.max(1, (outer.height * scale).round()),
+  );
+}
+
 /// A part of the photo rendered from the full-size decode.
 class _Tile {
   _Tile(
@@ -635,6 +680,23 @@ class DevelopCanvasState extends State<DevelopCanvas> {
         '${p.id}|${m.id}|$_fitSerial|${base.width}x${base.height}|'
         '${jsonEncode([for (final k in m.components) k.toJson()])}';
     if (key == _overlayKey) return;
+    // Our own handle: [_work] may replace the fitted copy, or the editor
+    // close, while this awaits the rasteriser and the auto maps.
+    final own = base.clone();
+    try {
+      await _overlayFrom(own, m, p, key);
+    } finally {
+      own.dispose();
+    }
+  }
+
+  /// [_overlayWork] on [base], a handle it owns.
+  Future<void> _overlayFrom(
+    ui.Image base,
+    Mask m,
+    PhotoItem p,
+    String key,
+  ) async {
     final raster = await (_rasterizer ??= MaskRasterizer.load());
     // The tile rule: at most 2048 px a side goes to the shader.
     final fitK = math.min(1.0, 2048 / math.max(base.width, base.height));
@@ -909,9 +971,10 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     return stats;
   }
 
-  /// The visible part of the photo (photo pixels) and the render scale, when
-  /// the fitted copy is too coarse for this zoom.
-  (Rect, double)? _fullSizeView(PhotoItem p) {
+  /// The visible part of the photo (photo pixels), the render scale and the
+  /// view's centre (photo pixels), when the fitted copy is too coarse for
+  /// this zoom.
+  (Rect, double, Offset)? _fullSizeView(PhotoItem p) {
     final fit = _fit;
     if (fit == null || _fitId != p.id || _fullFailedId == p.id) return null;
     final g = _geometry(p);
@@ -930,7 +993,11 @@ class DevelopCanvasState extends State<DevelopCanvas> {
       math.min(p.width.toDouble(), (x1 + g.cropX).ceilToDouble()),
       math.min(p.height.toDouble(), (y1 + g.cropY).ceilToDouble()),
     );
-    return (r, math.min(1.0, screen));
+    final centre = Offset(
+      (_view.width / 2 - o.dx) / s + g.cropX,
+      (_view.height / 2 - o.dy) / s + g.cropY,
+    );
+    return (r, math.min(1.0, screen), centre);
   }
 
   Future<void> _workTile(
@@ -949,7 +1016,19 @@ class DevelopCanvasState extends State<DevelopCanvas> {
       return;
     }
     if (!_tileWanted || c.comparing || c.changing) return;
-    final (inner, ts) = want;
+    final (visible, ts, centre) = want;
+    final fullSize = Size(p.width * ts, p.height * ts);
+    final m = s.isNeutral ? 0 : c.developer.margin(s, ts, fullSize: fullSize);
+    // The tile rule: the piece with its margin is at most 2048 px a side.
+    final piece = tilePiece(
+      visible: visible,
+      centre: centre,
+      margin: m,
+      scale: ts,
+      photo: Size(p.width.toDouble(), p.height.toDouble()),
+    );
+    if (piece == null) return; // the fitted copy stays enlarged
+    final inner = piece.inner, outer = piece.outer;
     final key = '${p.id}|$inner|$ts|$look';
     if (_tile?.key == key) return;
 
@@ -974,17 +1053,7 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     }
     final full = _full!;
     final kf = full.width / p.width;
-    final fullSize = Size(p.width * ts, p.height * ts);
-    final m = s.isNeutral ? 0 : c.developer.margin(s, ts, fullSize: fullSize);
-    final mp = (m / ts).ceilToDouble();
-    final outer = Rect.fromLTRB(
-      math.max(0, inner.left - mp),
-      math.max(0, inner.top - mp),
-      math.min(p.width.toDouble(), inner.right + mp),
-      math.min(p.height.toDouble(), inner.bottom + mp),
-    );
-    final ow = math.max(1, (outer.width * ts).round()),
-        oh = math.max(1, (outer.height * ts).round());
+    final ow = piece.width, oh = piece.height;
     final crop = await recordImage(
       ow,
       oh,

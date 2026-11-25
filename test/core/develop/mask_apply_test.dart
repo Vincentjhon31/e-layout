@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pio_photo_layout/core/develop/auto_masks.dart';
 import 'package:pio_photo_layout/core/develop/masks.dart';
 import 'package:pio_photo_layout/core/develop/photo_developer.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
@@ -267,6 +268,43 @@ void main() {
       dev.clearCache();
       await go(0.7);
       expect(dev.debugCoveragesDrawn, 2);
+      src.dispose();
+    });
+  });
+
+  testWidgets('clones of the same auto maps share the cached coverage', (
+    t,
+  ) async {
+    await withDev(t, () async {
+      final src = await image(richRgba(5));
+      final maps = await computeAutoMaps(src);
+      final again = await computeAutoMaps(src);
+      Mask subject(double ev) => Mask(
+        id: 's',
+        components: const [MaskComponent(SubjectShape())],
+        adjust: {Setting.exposure: ev},
+      );
+      Future<void> go(AutoMaps from, double ev) async {
+        // A fresh clone per render, as Home hands out.
+        final auto = from.clone();
+        final out = await dev.develop(
+          src,
+          withMasks([subject(ev)]),
+          auto: auto,
+        );
+        auto.dispose();
+        out.dispose();
+      }
+
+      await go(maps, 0.5);
+      await go(maps, 0.6);
+      await go(maps, 0.7);
+      expect(dev.debugCoveragesDrawn, 1);
+      // Maps computed again (another photo, or a retry) are drawn anew.
+      await go(again, 0.7);
+      expect(dev.debugCoveragesDrawn, 2);
+      maps.dispose();
+      again.dispose();
       src.dispose();
     });
   });

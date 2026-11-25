@@ -61,13 +61,23 @@ class BatchLook {
 
   bool hasOwnChanges(int id) => photos.containsKey(id);
 
-  /// Replaces the shared preset ([patch] null means "None"). Overrides stay.
+  /// True when the shared look holds nothing a preset sets, so it shows as
+  /// "None". Shared masks and lens blur do not count: presets never carry
+  /// them.
+  bool get sharedPresetIsEmpty =>
+      shared.without(const {ToolGroup.masks}).isEmpty;
+
+  /// Replaces the shared preset ([patch] null means "None"). Overrides stay,
+  /// and so do the shared masks and lens blur (copied to all with "Masks &
+  /// blur"): presets never carry them, and Home has no undo.
   BatchLook withPresetForAll(
     SettingsPatch? patch,
     String? name, [
     String? id,
   ]) => _make(
-    patch ?? SettingsPatch(),
+    (patch ?? SettingsPatch())
+        .without(const {ToolGroup.masks})
+        .over(SettingsPatch(masks: shared.masks, lensBlur: shared.lensBlur)),
     patch == null ? null : name,
     patch == null ? null : id,
     photos,

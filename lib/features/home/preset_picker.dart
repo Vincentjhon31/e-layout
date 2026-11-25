@@ -182,7 +182,7 @@ class _PresetPickerState extends State<PresetPicker> {
 
   bool _isCurrent(Preset? p) {
     final look = c.look;
-    if (p == null) return look.sharedId == null && look.shared.isEmpty;
+    if (p == null) return look.sharedId == null && look.sharedPresetIsEmpty;
     return look.sharedId == p.id;
   }
 

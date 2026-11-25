@@ -220,6 +220,26 @@ void main() {
       }
     });
 
+    test('a preset or None for all keeps the shared masks and blur', () {
+      final copied = base().copyToAll(1, {ToolGroup.masks}, keepSingle: false);
+      for (final preset in [
+        SettingsPatch(values: {Setting.exposure: 0.4}),
+        null,
+      ]) {
+        final look = copied.withPresetForAll(preset, 'Warm', 'id-w');
+        for (final id in [1, 2, 3]) {
+          final s = look.settingsFor(id);
+          expect(s.masks.map((m) => m.id), ['m1'], reason: 'photo $id');
+          expect(s.lensBlur.amount, 40, reason: 'photo $id');
+          expect(s[Setting.exposure], preset == null ? 0 : 0.4);
+        }
+        expect(look.sharedName, preset == null ? isNull : 'Warm');
+        expect(look.sharedPresetIsEmpty, preset == null);
+      }
+      expect(copied.sharedPresetIsEmpty, isTrue, reason: 'masks are no preset');
+      expect(const BatchLook().sharedPresetIsEmpty, isTrue);
+    });
+
     test('copying an empty mask list clears the others', () {
       final look = base().copyToAll(3, {ToolGroup.masks}, keepSingle: false);
       expect(look.settingsFor(2).masks, isEmpty);

@@ -13,6 +13,8 @@ import 'panels_test.dart' show dragTo, open, overflow;
 import 'photo_editor_test.dart'
     show canvasState, editorOn, homeWith, pumpEditor, settle;
 
+const _hint = 'Until you choose one, the subject stays sharp.';
+
 Finder _slider(String key) => find.descendant(
   of: find.byKey(ValueKey(key)),
   matching: find.byType(CupertinoSlider),
@@ -138,6 +140,7 @@ void main() {
       await run(tester, () => e.setLens(LensBlur(focus: LensFocus.mask)));
       await tester.pumpAndSettle();
       expect(find.text('Choose a mask'), findsOneWidget);
+      expect(find.text(_hint), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('lens-mask-picker')));
       await tester.pumpAndSettle();
       expect(find.text('Mask 2'), findsOneWidget);
@@ -145,6 +148,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(e.settings.lensBlur.maskId, first);
       expect(find.text('Choose a mask'), findsNothing);
+      expect(find.text(_hint), findsNothing);
     });
 
     etest('a removed mask shows "Choose a mask" and does not crash', (
@@ -160,9 +164,11 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Mask 1'), findsOneWidget);
+      expect(find.text(_hint), findsNothing);
       await run(tester, () => e.deleteMask(id));
       await tester.pumpAndSettle();
       expect(find.text('Choose a mask'), findsOneWidget);
+      expect(find.text(_hint), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -199,6 +205,20 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(overflow(tester), 0, reason: 'mask');
+        // No mask chosen (it was deleted): the hint shows under the picker.
+        // It fits from 390; the smallest phone scrolls by less than a line
+        // in this rare state rather than clipping.
+        await run(
+          tester,
+          () => e.setLens(LensBlur(amount: 50, focus: LensFocus.mask)),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text(_hint), findsOneWidget);
+        expect(
+          overflow(tester),
+          size.width < 390 ? lessThan(16) : 0,
+          reason: 'mask with the hint',
+        );
       });
     }
   });
@@ -419,6 +439,23 @@ void main() {
       await expectLater(
         screen(),
         matchesGoldenFile('goldens/blur_panel_dark.png'),
+      );
+    });
+
+    etest('panel with no mask chosen shows the focus hint', (tester) async {
+      final e = await open(tester, ToolPanel.blur);
+      await run(tester, () => e.addMask(RadialShape()));
+      await run(
+        tester,
+        () => e.setLens(LensBlur(amount: 60, focus: LensFocus.mask)),
+      );
+      e.setPanel(ToolPanel.blur);
+      await tester.pumpAndSettle();
+      await settle(tester);
+      await tester.pumpAndSettle();
+      await expectLater(
+        screen(),
+        matchesGoldenFile('goldens/blur_panel_focus_hint.png'),
       );
     });
 

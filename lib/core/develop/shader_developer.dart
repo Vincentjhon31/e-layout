@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
+import 'auto_masks.dart';
 import 'color_pipeline.dart';
 import 'lut.dart';
 import 'mask_raster.dart';
@@ -397,7 +398,7 @@ class ShaderDeveloper implements PhotoDeveloper {
   final MaskRasterizer _raster;
 
   // Mask coverage per (components, region, photo size, scale, and the auto
-  // maps or source they read), and the lens blur's point focus maps, the
+  // maps' generation or the source they read), and the lens blur's point focus maps, the
   // last [_maxCoverages], newest last. One more than the masks, so the lens
   // focus does not push out a mask's coverage on every render.
   final List<_Coverage> _coverages = [];
@@ -1178,16 +1179,22 @@ String _lutKeyOf(EditSettings s, int size) =>
 
 /// One cached mask coverage.
 class _Coverage {
-  _Coverage(this.key, this.auto, this.src, this.image);
+  _Coverage(this.key, AutoMapsSource? auto, this.src, this.image)
+    : auto = idOf(auto);
 
   /// The components, region, photo size and scale.
   final String key;
 
-  /// The auto maps and the source the coverage read, by identity (null when
-  /// it read none).
-  final AutoMapsSource? auto;
+  /// The auto maps the coverage read ([idOf]), and the source it read by
+  /// identity (null when it read none).
+  final Object? auto;
   final ui.Image? src;
   final ui.Image image;
+
+  /// What identifies auto maps here: [AutoMaps.generation], shared by the
+  /// clones Home hands out per render (one computation, so one photo);
+  /// other sources by identity.
+  static Object? idOf(AutoMapsSource? a) => a is AutoMaps ? a.generation : a;
 
   static String keyOf(
     Mask m,
@@ -1207,5 +1214,5 @@ class _Coverage {
   ]);
 
   bool matches(String k, AutoMapsSource? a, ui.Image? s) =>
-      key == k && identical(auto, a) && identical(src, s);
+      key == k && auto == idOf(a) && identical(src, s);
 }
