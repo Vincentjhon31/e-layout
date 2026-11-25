@@ -730,7 +730,9 @@ class _ShapeTab extends StatelessWidget {
           ],
         );
       case LinearShape():
-        return const PanelNote('Drag the lines on the photo to move it.');
+        return const PanelNote(
+          'Drag a line on the photo, or the middle dot to move both.',
+        );
       case BrushShape():
         return _Triple(
           _brush(

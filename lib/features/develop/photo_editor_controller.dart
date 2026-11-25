@@ -131,6 +131,15 @@ class PhotoEditorController extends ChangeNotifier {
     await home.setLook(draft);
   }
 
+  /// Drops the change being dragged: the look goes back to what it was
+  /// (a pinch that took over a handle drag on the photo).
+  void cancelChange() {
+    if (_dragBase == null && _draft == null) return;
+    _dragBase = null;
+    _draft = null;
+    _changed();
+  }
+
   // ---------- one-step changes ----------
 
   /// Keeps the look [next] makes as one undo step. A drag still going is

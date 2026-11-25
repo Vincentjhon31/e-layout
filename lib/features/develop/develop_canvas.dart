@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -6,6 +7,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/develop/auto_masks.dart';
+import '../../core/develop/mask_raster.dart';
+import '../../core/develop/masks.dart';
 import '../../core/develop/photo_developer.dart';
 import '../../core/develop/profile_table.dart';
 import '../../core/develop/settings.dart';
@@ -14,8 +18,10 @@ import '../../core/render/layout_painter.dart';
 import '../../core/render/layout_prep.dart';
 import '../../core/render/photo_geometry.dart';
 import '../../ui/app_theme.dart';
+import '../../ui/widgets/toast.dart';
 import '../home/home_controller.dart';
 import '../viewer/photo_viewer.dart' show decodeScaled, kViewerEdge;
+import 'mask_handles.dart';
 import 'photo_editor_controller.dart';
 
 /// Height of the band at the top of the canvas for the labels over it.
@@ -71,6 +77,11 @@ class _Tile {
 
 /// The photo with its edits (and the layout), fitted in the box. Pinch, or
 /// Ctrl+scroll, zooms up to 100 %; press and hold shows the original.
+///
+/// With the Masking panel open and a mask selected, one finger edits the
+/// selected shape on the photo (a handle, a brush stroke, a colour sample);
+/// two fingers still zoom and pan. The mask shows in red while "Show mask"
+/// is on and while a handle or the brush is dragged.
 class DevelopCanvas extends StatefulWidget {
   const DevelopCanvas({super.key, required this.controller});
 
@@ -124,6 +135,25 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   double _z0 = 1;
   Offset _p0 = Offset.zero;
 
+  // Fingers down, and whether this touch has had two (then it only zooms
+  // and pans until every finger is up). Where the first one came down.
+  int _pointers = 0;
+  bool _multi = false;
+  Offset? _downAt;
+  MaskDrag? _maskDrag;
+
+  // The selected mask's coverage of the fitted photo, for the red overlay:
+  // the photo and mask it shows, and its key (photo, image, components).
+  Future<MaskRasterizer>? _rasterizer;
+  ui.Image? _overlay;
+  (int, String)? _overlayOf;
+  String? _overlayKey;
+  bool _overlayBusy = false, _overlayAgain = false, _overlayScheduled = false;
+
+  // The pixels of the image colour samples are read from.
+  ui.Image? _pixelsOf;
+  Uint8List? _pixels;
+
   @override
   void initState() {
     super.initState();
@@ -145,7 +175,11 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     _disposed = true;
     c.removeListener(_changed);
     _tileTimer?.cancel();
+    // A drag still going is dropped once the tree is done.
+    final drag = _maskDrag;
+    if (drag != null) scheduleMicrotask(drag.cancel);
     if (!_busy) _freeAll();
+    if (!_overlayBusy) _freeOverlay();
     super.dispose();
   }
 
@@ -159,6 +193,8 @@ class DevelopCanvasState extends State<DevelopCanvas> {
       _focus = null;
       _tileTimer?.cancel();
       _tileWanted = false;
+      // Another photo: the drag ended with it (showPhoto kept it).
+      _maskDrag = null;
     }
     setState(() {});
   }
@@ -167,7 +203,12 @@ class DevelopCanvasState extends State<DevelopCanvas> {
 
   /// Nothing is rendering or waiting to render.
   @visibleForTesting
-  bool get idle => !_busy && !_scheduled && !(_tileTimer?.isActive ?? false);
+  bool get idle =>
+      !_busy &&
+      !_scheduled &&
+      !(_tileTimer?.isActive ?? false) &&
+      !_overlayBusy &&
+      !_overlayScheduled;
 
   /// Screen pixels per photo pixel, in percent.
   @visibleForTesting
@@ -183,6 +224,26 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   /// A part rendered from the full-size photo is on screen.
   @visibleForTesting
   bool get showsFullSize => _tileShown(c.photo) != null;
+
+  /// How the photo is shown now, for mask positions.
+  @visibleForTesting
+  MaskView get maskView {
+    final p = c.photo;
+    final g = _geometry(p);
+    return _maskView(p, g, _scale(g));
+  }
+
+  /// The selected mask's coverage is on screen in red.
+  @visibleForTesting
+  bool get showsMaskOverlay => _overlayShown() != null;
+
+  /// Zooms to [z] (1 is fitted) around the middle of the box.
+  @visibleForTesting
+  void zoomTo(double z) {
+    final at = _view.center(Offset.zero);
+    setState(() => _zoomAround(at, _toPhoto(at), z));
+    _waitForFullSize();
+  }
 
   // ---------- geometry ----------
 
@@ -264,16 +325,275 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     return (local - _origin(g, s)) / s;
   }
 
+  MaskView _maskView(PhotoItem p, PhotoGeometry g, double s) => MaskView(
+    photo: Size(p.width.toDouble(), p.height.toDouble()),
+    frame: Rect.fromLTWH(
+      g.cropX.toDouble(),
+      g.cropY.toDouble(),
+      g.w.toDouble(),
+      g.h.toDouble(),
+    ),
+    scale: s,
+    origin: _origin(g, s),
+    reach: Rect.fromLTRB(0, kCanvasTopBand, _view.width, _view.height),
+  );
+
+  /// The shape one finger edits on the photo: the selected shape of the
+  /// selected mask, with the Masking panel open, when it is one with
+  /// handles, a brush or a colour range.
+  MaskShape? get _maskTarget {
+    if (c.panel != ToolPanel.masks || c.comparing) return null;
+    final m = c.selectedMask;
+    if (m == null || m.components.isEmpty) return null;
+    final s = m.components[c.selectedComponent].shape;
+    return editsOnPhoto(s) ? s : null;
+  }
+
   // ---------- gestures ----------
 
+  void _pointerDown(PointerDownEvent e) {
+    _pointers++;
+    if (_pointers == 1) {
+      _downAt = e.localPosition;
+      return;
+    }
+    // A second finger: a pinch, never a mask edit.
+    _multi = true;
+    final drag = _maskDrag;
+    if (drag != null) {
+      _maskDrag = null;
+      drag.cancel();
+      setState(() {});
+    }
+  }
+
+  void _pointerUp(PointerEvent e) {
+    _pointers = math.max(0, _pointers - 1);
+    if (_pointers == 0) {
+      _multi = false;
+      _downAt = null;
+    }
+  }
+
+  void _toast(String message) {
+    if (mounted) showToast(context, message);
+  }
+
   void _scaleStart(ScaleStartDetails d) {
+    final down = _downAt;
+    if (d.pointerCount == 1 && !_multi && down != null && _maskTarget != null) {
+      final drag = MaskDrag.start(c, maskView, down, toast: _toast);
+      if (drag != null) {
+        _maskDrag = drag;
+        drag.update(maskView, d.localFocalPoint);
+        setState(() {});
+        return;
+      }
+    }
     _z0 = _z;
     _p0 = _toPhoto(d.localFocalPoint);
   }
 
   void _scaleUpdate(ScaleUpdateDetails d) {
+    final drag = _maskDrag;
+    if (drag != null) {
+      drag.update(maskView, d.localFocalPoint);
+      setState(() {});
+      return;
+    }
     setState(() => _zoomAround(d.localFocalPoint, _p0, _z0 * d.scale));
     _waitForFullSize();
+  }
+
+  void _scaleEnd(ScaleEndDetails d) {
+    final drag = _maskDrag;
+    if (drag == null) {
+      _waitForFullSize();
+      return;
+    }
+    _maskDrag = null;
+    // A finger came down meanwhile: the pinch takes over.
+    if (d.pointerCount > 0) {
+      drag.cancel();
+    } else {
+      drag.end();
+    }
+    setState(() {});
+  }
+
+  void _tapUp(TapUpDetails d) {
+    if (_maskTarget == null) return;
+    tapMask(c, maskView, d.localPosition, sample: _sampleAt, toast: _toast);
+  }
+
+  /// The colour of the photo at normalised (x, y), 0 to 1 per channel.
+  ///
+  /// It is read from the photo without its edits, which is what the colour
+  /// range compares against (MaskRasterizer reads the source), so a sample
+  /// picked after a change of colour still selects the pixels tapped.
+  Future<(double, double, double)?> _sampleAt(double x, double y) async {
+    final p = c.photo;
+    final img = (_fitId == p.id ? _fit : null) ?? p.preview;
+    if (img == null) return null;
+    if (!identical(_pixelsOf, img) || _pixels == null) {
+      final px = await readRgba(img);
+      _pixelsOf = img;
+      _pixels = px;
+    }
+    final px = _pixels!;
+    final w = img.width, h = img.height;
+    if (px.length < w * h * 4) return null;
+    final ix = (x * w).floor().clamp(0, w - 1);
+    final iy = (y * h).floor().clamp(0, h - 1);
+    final i = (iy * w + ix) * 4;
+    return (px[i] / 255, px[i + 1] / 255, px[i + 2] / 255);
+  }
+
+  // ---------- the mask overlay ----------
+
+  /// The selected mask, when its coverage should be on screen: "Show mask"
+  /// is on, or a handle or the brush is being dragged.
+  Mask? get _overlayMask {
+    if (c.panel != ToolPanel.masks || c.comparing) return null;
+    final m = c.selectedMask;
+    if (m == null || m.components.isEmpty) return null;
+    final dragging = _maskDrag?.live ?? false;
+    return c.showOverlay || dragging ? m : null;
+  }
+
+  /// The overlay image when it belongs on screen now.
+  ui.Image? _overlayShown() {
+    final m = _overlayMask;
+    final o = _overlayOf;
+    if (m == null || o == null) return null;
+    return o.$1 == c.photo.id && o.$2 == m.id ? _overlay : null;
+  }
+
+  void _scheduleOverlay() {
+    if (_overlayScheduled || _disposed) return;
+    final m = _overlayMask;
+    if (m == null && _overlay == null) return;
+    _overlayScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _overlayScheduled = false;
+      if (!_disposed) _drawOverlay();
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  /// One overlay render at a time, like [_render].
+  Future<void> _drawOverlay() async {
+    if (_overlayBusy) {
+      _overlayAgain = true;
+      return;
+    }
+    _overlayBusy = true;
+    try {
+      do {
+        _overlayAgain = false;
+        try {
+          await _overlayWork();
+        } catch (e) {
+          debugPrint('The mask could not be drawn: $e');
+          _overlayKey = null;
+        }
+      } while (_overlayAgain && !_disposed);
+    } finally {
+      _overlayBusy = false;
+      if (_disposed) _freeOverlay();
+    }
+  }
+
+  Future<void> _overlayWork() async {
+    if (_disposed) return;
+    final m = _overlayMask;
+    final p = c.photo;
+    final base = _fitId == p.id ? _fit : null;
+    if (m == null) {
+      // Not shown: the image goes.
+      if (_overlay != null) {
+        _freeOverlay();
+        _update();
+      }
+      return;
+    }
+    if (base == null) return;
+    // Only what the coverage depends on is in the key.
+    final key =
+        '${p.id}|${identityHashCode(base)}|${base.width}x${base.height}|'
+        '${jsonEncode([for (final k in m.components) k.toJson()])}';
+    if (key == _overlayKey) return;
+    final raster = await (_rasterizer ??= MaskRasterizer.load());
+    // The tile rule: at most 2048 px a side goes to the shader.
+    final fitK = math.min(1.0, 2048 / math.max(base.width, base.height));
+    final src = fitK < 1
+        ? await scaleImage(
+            base,
+            math.max(1, (base.width * fitK).floor()),
+            math.max(1, (base.height * fitK).floor()),
+          )
+        : base;
+    final AutoMaps? auto;
+    try {
+      auto =
+          m.components.any(
+            (x) =>
+                x.shape is SubjectShape ||
+                x.shape is SkyShape ||
+                x.shape is BackgroundShape,
+          )
+          ? await c.home.autoMapsFor(
+              p,
+              // Asked as if the mask changed the photo, so they are made.
+              EditSettings.resolve([
+                SettingsPatch(
+                  masks: [
+                    Mask(
+                      id: m.id,
+                      components: m.components,
+                      adjust: const {Setting.exposure: 1},
+                    ),
+                  ],
+                ),
+              ]),
+            )
+          : null;
+    } catch (e) {
+      if (!identical(src, base)) src.dispose();
+      rethrow;
+    }
+    final ui.Image cov;
+    try {
+      cov = await raster.coverage(
+        Mask(id: m.id, components: m.components),
+        src: src,
+        origin: Offset.zero,
+        fullSize: Size(src.width.toDouble(), src.height.toDouble()),
+        scale: src.width / p.width,
+        auto: auto,
+      );
+    } finally {
+      auto?.dispose();
+      if (!identical(src, base)) src.dispose();
+    }
+    if (_disposed) {
+      cov.dispose();
+      return;
+    }
+    _overlay?.dispose();
+    _overlay = cov;
+    _overlayOf = (p.id, m.id);
+    _overlayKey = key;
+    _update();
+    // The mask may have moved on meanwhile.
+    _overlayAgain = true;
+  }
+
+  void _freeOverlay() {
+    _overlay?.dispose();
+    _overlay = null;
+    _overlayOf = null;
+    _overlayKey = null;
   }
 
   /// Mouse wheel: Ctrl zooms around the pointer, otherwise it pans.
@@ -662,17 +982,27 @@ class DevelopCanvasState extends State<DevelopCanvas> {
           if (_focus != null) _clampFocus(_geometry(p));
         }
         _schedule();
+        _scheduleOverlay();
         final img = _imageFor(p);
         final g = _geometry(p);
         final s = _scale(g);
         final item = _item;
+        final target = _maskTarget;
+        final overlay = _overlayShown();
+        final drag = _maskDrag;
+        final painting = drag != null && drag.live && drag.painting;
+        final tappable = target is ColourRangeShape || target is BrushShape;
         return Listener(
           onPointerSignal: _scroll,
+          onPointerDown: _pointerDown,
+          onPointerUp: _pointerUp,
+          onPointerCancel: _pointerUp,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
+            onTapUp: tappable ? _tapUp : null,
             onScaleStart: _scaleStart,
             onScaleUpdate: _scaleUpdate,
-            onScaleEnd: (_) => _waitForFullSize(),
+            onScaleEnd: _scaleEnd,
             onLongPressStart: (_) => c.setComparing(true),
             onLongPressEnd: (_) => c.setComparing(false),
             onLongPressCancel: () => c.setComparing(false),
@@ -701,6 +1031,26 @@ class DevelopCanvasState extends State<DevelopCanvas> {
                             ),
                     ),
                   ),
+                  if (img != null && (target != null || overlay != null))
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: CustomPaint(
+                          painter: MaskHandlesPainter(
+                            view: _maskView(p, g, s),
+                            shape:
+                                target is RadialShape || target is LinearShape
+                                ? target
+                                : null,
+                            overlay: overlay,
+                            active: drag?.handle,
+                            brushAt: painting ? drag.at : null,
+                            brushSize: c.brushSize,
+                            brushFeather: c.brushFeather,
+                            accent: colors.accent,
+                          ),
+                        ),
+                      ),
+                    ),
                   if (c.comparing)
                     const Positioned(
                       top: 12,

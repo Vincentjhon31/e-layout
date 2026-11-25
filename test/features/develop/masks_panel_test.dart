@@ -15,7 +15,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../editor/editor_screen_test.dart' show etest;
 import 'panels_test.dart' show dragTo, open, openTab, overflow, sliderOf;
-import 'photo_editor_test.dart' show editorOn, homeWith, pumpEditor, settle;
+import 'photo_editor_test.dart'
+    show canvasState, editorOn, homeWith, pumpEditor, settle;
 
 List<Mask> masksOf(PhotoEditorController e) => e.settings.masks;
 
@@ -522,6 +523,10 @@ void main() {
         await e.renameMask(e.selectedMaskId!, 'Warm the path');
       });
       await settle(tester);
+      // Home's thumbnails catch up too, so the filmstrip is not caught
+      // half-way.
+      await tester.runAsync(e.home.whenIdle);
+      await settle(tester);
       return e;
     }
 
@@ -554,6 +559,7 @@ void main() {
         e.selectMask(masksOf(e).first.id);
         e.setShowOverlay(true);
         await tester.pump();
+        await settle(tester, until: () => canvasState(tester).showsMaskOverlay);
         await expectLater(
           panel(),
           matchesGoldenFile('goldens/masks_adjust${c.key}.png'),
