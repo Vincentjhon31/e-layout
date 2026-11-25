@@ -344,6 +344,170 @@ void main() {
     });
   });
 
+  group('gestures', () {
+    Offset canvasTopLeft(WidgetTester tester) =>
+        tester.getTopLeft(find.byType(DevelopCanvas));
+
+    etest('a stroke starts where the finger came down and shows at once', (
+      tester,
+    ) async {
+      final e = await openQuad(tester);
+      await run(tester, () => e.addMask(BrushShape(const [])));
+      final down = screenAt(tester, .4, .4);
+      final g = await tester.startGesture(down);
+      await g.moveBy(const Offset(6, 0));
+      await tester.pump();
+      expect(e.changing, isTrue, reason: 'the stroke is live');
+      final st = (shapeOf(e) as BrushShape).strokes.single;
+      final (x, y) = canvasState(
+        tester,
+      ).maskView.toNorm(down - canvasTopLeft(tester));
+      expect(st.points.first.$1, closeTo(x, 1e-4));
+      expect(st.points.first.$2, closeTo(y, 1e-4));
+      expect(st.points, hasLength(2), reason: 'down, then the 6 pt move');
+      await g.up();
+      await tester.pump();
+      await settle(tester);
+      expect(e.changing, isFalse);
+      expect((shapeOf(e) as BrushShape).strokes, hasLength(1));
+      await run(tester, e.undo);
+      expect(shapeOf(e), BrushShape(const []), reason: 'one step');
+    });
+
+    etest('a tap on a brush lays one dab', (tester) async {
+      final e = await openQuad(tester);
+      await run(tester, () => e.addMask(BrushShape(const [])));
+      await tester.tapAt(screenAt(tester, .6, .3));
+      await settle(tester);
+      final st = (shapeOf(e) as BrushShape).strokes.single;
+      expect(st.points.single.$1, closeTo(.6, 1e-3));
+      expect(st.points.single.$2, closeTo(.3, 1e-3));
+    });
+
+    etest('holding a handle still does not show the original', (tester) async {
+      final e = await openQuad(tester);
+      await run(tester, () => e.addMask(RadialShape()));
+      final (ux, uy) = unitsOf(tester);
+      final g = await tester.startGesture(screenAt(tester, .5, .5));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(e.comparing, isFalse);
+      for (var i = 0; i < 8; i++) {
+        await g.moveBy(const Offset(5, 2.5));
+        await tester.pump();
+        expect(e.comparing, isFalse);
+      }
+      await g.up();
+      await tester.pump();
+      await settle(tester);
+      final r = shapeOf(e) as RadialShape;
+      expect(r.cx, closeTo(.5 + 40 / ux, 1e-6));
+      expect(r.cy, closeTo(.5 + 20 / uy, 1e-6));
+    });
+
+    etest('a second finger mid-stroke drops the stroke and zooms', (
+      tester,
+    ) async {
+      final e = await openQuad(tester);
+      await run(tester, () => e.addMask(BrushShape(const [])));
+      final canvas = canvasState(tester);
+      final before = canvas.zoomPercent;
+      final c = screenAt(tester, .5, .5);
+      final a = await tester.startGesture(c - const Offset(20, 0));
+      for (var i = 0; i < 8; i++) {
+        await a.moveBy(const Offset(5, 0));
+        await tester.pump();
+      }
+      expect(e.changing, isTrue, reason: 'painting');
+      final b = await tester.startGesture(c + const Offset(60, 0));
+      await tester.pump();
+      for (var i = 0; i < 10; i++) {
+        await a.moveBy(const Offset(-8, 0));
+        await b.moveBy(const Offset(8, 0));
+        await tester.pump();
+      }
+      await a.up();
+      await b.up();
+      await tester.pump();
+      await settle(tester);
+      expect(shapeOf(e), BrushShape(const []), reason: 'no stroke');
+      expect(e.changing, isFalse);
+      expect(canvas.zoomPercent, greaterThan(before));
+      await run(tester, e.undo);
+      expect(masksOf(e), isEmpty, reason: 'no undo step for the stroke');
+    });
+
+    etest('a dot under the top labels is grabbed just below them', (
+      tester,
+    ) async {
+      final e = await openQuad(tester);
+      canvasState(tester).zoomTo(2);
+      await tester.pump();
+      await settle(tester);
+      final v = canvasState(tester).maskView;
+      // A centre 30 pt from the top of the canvas, under the labels.
+      final (_, cy) = v.toNorm(Offset(v.toScreen(.5, .5).dx, 30));
+      expect(cy, greaterThan(0));
+      await run(tester, () => e.addMask(RadialShape(cy: cy, rx: .1, ry: .05)));
+      final (_, uy) = unitsOf(tester);
+      final at = handlePoints(shapeOf(e), canvasState(tester).maskView);
+      for (final p in at.values) {
+        expect(p.dy, greaterThanOrEqualTo(kCanvasTopBand + kHandleHitRadius));
+      }
+      final grab =
+          canvasTopLeft(tester) +
+          Offset(v.toScreen(.5, cy).dx, kCanvasTopBand + kHandleHitRadius);
+      await drag(tester, grab, const Offset(0, 40));
+      final r = shapeOf(e) as RadialShape;
+      expect(r.cy, closeTo(cy + 40 / uy, 1e-6));
+      expect(r.cx, .5);
+    });
+
+    etest('rotating from 30 degrees adds the turn and wraps', (tester) async {
+      final e = await openQuad(tester);
+      await run(tester, () => e.addMask(RadialShape(angle: 30)));
+      Future<void> quarterTurn() async {
+        final v = canvasState(tester).maskView;
+        final r = shapeOf(e) as RadialShape;
+        final c = v.toScreen(r.cx, r.cy);
+        final rot = handlePoints(r, v)[MaskHandle.rotate]!;
+        final v0 = rot - c;
+        // A quarter turn clockwise on screen (y points down).
+        final v1 = Offset(-v0.dy, v0.dx);
+        await drag(tester, canvasTopLeft(tester) + rot, v1 - v0, steps: 12);
+      }
+
+      await quarterTurn();
+      expect((shapeOf(e) as RadialShape).angle, closeTo(120, 0.5));
+      await quarterTurn();
+      expect(
+        (shapeOf(e) as RadialShape).angle,
+        closeTo(-150, 0.5),
+        reason: '210 wraps to -150',
+      );
+    });
+
+    etest('a colour is sampled at 2x zoom', (tester) async {
+      final e = await openQuad(tester);
+      await run(tester, () => e.addMask(ColourRangeShape(const [])));
+      canvasState(tester).zoomTo(2);
+      await tester.pump();
+      await settle(tester);
+      for (final (x, q) in [(.45, 0), (.55, 3)]) {
+        final n = (shapeOf(e) as ColourRangeShape).samples.length;
+        await tester.tapAt(screenAt(tester, x, x));
+        await settle(
+          tester,
+          until: () => (shapeOf(e) as ColourRangeShape).samples.length > n,
+        );
+        final s = (shapeOf(e) as ColourRangeShape).samples.last;
+        final (r, g, b) = kQuad[q];
+        expect(s.$1, closeTo(r / 255, 2 / 255));
+        expect(s.$2, closeTo(g / 255, 2 / 255));
+        expect(s.$3, closeTo(b / 255, 2 / 255));
+      }
+    });
+  });
+
   group('colour range', () {
     etest('a tap adds the tapped colour', (tester) async {
       final e = await openQuad(tester);

@@ -125,8 +125,19 @@ Offset _rotateDot(
   return top;
 }
 
-/// The dots drawn for [s], by handle.
+/// The dots drawn and grabbed for [s], by handle. Each one stays at least
+/// [kHandleHitRadius] below the top of [MaskView.reach], so none goes under
+/// the labels at the top of the canvas (a dot pushed down is grabbed there).
 Map<MaskHandle, Offset> handlePoints(MaskShape s, MaskView v) {
+  final lowest = v.reach.top + kHandleHitRadius;
+  return {
+    for (final e in _shapePoints(s, v).entries)
+      e.key: e.value.dy < lowest ? Offset(e.value.dx, lowest) : e.value,
+  };
+}
+
+/// The handles' places on the shape itself (not kept off the labels).
+Map<MaskHandle, Offset> _shapePoints(MaskShape s, MaskView v) {
   switch (s) {
     case RadialShape():
       final (c, u, w, a, b) = _radialAxes(s, v);
@@ -165,7 +176,7 @@ MaskHandle? hitHandle(MaskShape s, MaskView v, Offset p) {
   var dist = kHandleHitRadius;
   for (final e in handlePoints(s, v).entries) {
     final d = (e.value - p).distance;
-    if (d <= dist) {
+    if (d < dist || (best == null && d <= dist)) {
       dist = d;
       best = e.key;
     }
@@ -302,6 +313,9 @@ class MaskDrag {
   bool live = true;
 
   bool get painting => _stroke != null;
+
+  /// A brush drag (painting, or a full brush that paints nothing).
+  bool get isBrush => handle == null;
 
   /// Starts a drag at [down] on the selected mask's selected shape, or
   /// returns null when the finger is on nothing to drag (the canvas then
@@ -473,7 +487,10 @@ class MaskHandlesPainter extends CustomPainter {
   final Color accent;
 
   static const Color _white = Color(0xFFFFFFFF);
-  static const Color _shade = Color(0x66000000);
+
+  /// The soft shadow under the white lines and dots: black at 35 %.
+  static const Color _shade = Color(0x59000000);
+  static const MaskFilter _soft = MaskFilter.blur(BlurStyle.normal, 1.5);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -521,10 +538,16 @@ class MaskHandlesPainter extends CustomPainter {
     bool faint = false,
   }) {
     draw(
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = width + (faint ? 1 : 2)
-        ..color = faint ? const Color(0x1F000000) : _shade,
+      faint
+          ? (Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = width + 1
+              ..color = const Color(0x1F000000))
+          : (Paint()
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2
+              ..color = _shade
+              ..maskFilter = _soft),
     );
     draw(
       Paint()
@@ -544,7 +567,13 @@ class MaskHandlesPainter extends CustomPainter {
 
   void _dot(Canvas canvas, Offset c, MaskHandle h, {double r = 6}) {
     final on = h == active;
-    canvas.drawCircle(c, r + 1.5, Paint()..color = _shade);
+    canvas.drawCircle(
+      c,
+      r + 0.5,
+      Paint()
+        ..color = _shade
+        ..maskFilter = _soft,
+    );
     canvas.drawCircle(c, r, Paint()..color = on ? accent : _white);
     if (h == MaskHandle.centre || h == MaskHandle.middle) {
       canvas.drawCircle(c, r * 0.4, Paint()..color = on ? _white : accent);
@@ -553,7 +582,7 @@ class MaskHandlesPainter extends CustomPainter {
 
   void _radial(Canvas canvas, RadialShape s) {
     final pts = handlePoints(s, view);
-    final c = pts[MaskHandle.centre]!;
+    final c = view.toScreen(s.cx, s.cy);
     final a = s.rx * view.unitX, b = s.ry * view.unitY;
     void oval(double k, double width, {bool faint = false}) {
       _stroke(
@@ -597,7 +626,7 @@ class MaskHandlesPainter extends CustomPainter {
     ]) {
       _dot(canvas, pts[h]!, h, r: 5);
     }
-    _dot(canvas, c, MaskHandle.centre, r: 8);
+    _dot(canvas, pts[MaskHandle.centre]!, MaskHandle.centre, r: 8);
   }
 
   /// The segment of the line through [p] along [dir] inside [r], if any
@@ -630,7 +659,7 @@ class MaskHandlesPainter extends CustomPainter {
 
   void _linear(Canvas canvas, LinearShape s) {
     final pts = handlePoints(s, view);
-    final a = pts[MaskHandle.start]!, b = pts[MaskHandle.end]!;
+    final a = view.toScreen(s.x0, s.y0), b = view.toScreen(s.x1, s.y1);
     final across = _across(a, b);
     final box = view.photoRect;
     final start = _clip(a, across, box);
@@ -642,8 +671,8 @@ class MaskHandlesPainter extends CustomPainter {
       _stroke(canvas, (p) => _dashed(canvas, end.$1, end.$2, p), 1.5);
     }
     _stroke(canvas, (p) => _dashed(canvas, a, b, p), 1, faint: true);
-    _dot(canvas, a, MaskHandle.start);
-    _dot(canvas, b, MaskHandle.end);
+    _dot(canvas, pts[MaskHandle.start]!, MaskHandle.start);
+    _dot(canvas, pts[MaskHandle.end]!, MaskHandle.end);
     _dot(canvas, pts[MaskHandle.middle]!, MaskHandle.middle, r: 8);
   }
 

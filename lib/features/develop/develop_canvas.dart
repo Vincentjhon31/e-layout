@@ -154,6 +154,12 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   ui.Image? _pixelsOf;
   Uint8List? _pixels;
 
+  // Bumped each time the fitted photo is replaced: the overlay's key.
+  int _fitSerial = 0;
+
+  // The scale gesture under way belongs to the brush (the Listener paints).
+  bool _scaleIgnored = false;
+
   @override
   void initState() {
     super.initState();
@@ -178,6 +184,8 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     // A drag still going is dropped once the tree is done.
     final drag = _maskDrag;
     if (drag != null) scheduleMicrotask(drag.cancel);
+    _pixels = null;
+    _pixelsOf = null;
     if (!_busy) _freeAll();
     if (!_overlayBusy) _freeOverlay();
     super.dispose();
@@ -195,6 +203,8 @@ class DevelopCanvasState extends State<DevelopCanvas> {
       _tileWanted = false;
       // Another photo: the drag ended with it (showPhoto kept it).
       _maskDrag = null;
+      _pixels = null;
+      _pixelsOf = null;
     }
     setState(() {});
   }
@@ -367,12 +377,47 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     }
   }
 
+  /// One finger on a brush paints from where it came down, on every move
+  /// (the scale gesture only starts after its slop).
+  void _pointerMove(PointerMoveEvent e) {
+    if (_pointers != 1 || _multi) return;
+    var drag = _maskDrag;
+    if (drag == null) {
+      final down = _downAt;
+      if (down == null || _maskTarget is! BrushShape) return;
+      drag = MaskDrag.start(c, maskView, down, toast: _toast);
+      if (drag == null) return;
+      _maskDrag = drag;
+    } else if (!drag.isBrush) {
+      return;
+    }
+    drag.update(maskView, e.localPosition);
+    setState(() {});
+  }
+
   void _pointerUp(PointerEvent e) {
     _pointers = math.max(0, _pointers - 1);
-    if (_pointers == 0) {
-      _multi = false;
-      _downAt = null;
+    if (_pointers > 0) return;
+    final drag = _maskDrag;
+    if (drag != null && drag.isBrush) {
+      // The last finger is up: the stroke is one undo step.
+      _maskDrag = null;
+      if (e is PointerCancelEvent) {
+        drag.cancel();
+      } else {
+        drag.end();
+      }
+      setState(() {});
+    } else if (drag == null &&
+        !_multi &&
+        e is PointerUpEvent &&
+        _downAt != null &&
+        _maskTarget is BrushShape) {
+      // A tap on a brush: a one-point stroke, a dab.
+      MaskDrag.start(c, maskView, _downAt!, toast: _toast)?.end();
     }
+    _multi = false;
+    _downAt = null;
   }
 
   void _toast(String message) {
@@ -380,7 +425,15 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   }
 
   void _scaleStart(ScaleStartDetails d) {
+    _scaleIgnored = false;
     final down = _downAt;
+    if (d.pointerCount == 1 && !_multi) {
+      // One finger on a brush: the Listener paints, nothing pans.
+      if ((_maskDrag?.isBrush ?? false) || _maskTarget is BrushShape) {
+        _scaleIgnored = true;
+        return;
+      }
+    }
     if (d.pointerCount == 1 && !_multi && down != null && _maskTarget != null) {
       final drag = MaskDrag.start(c, maskView, down, toast: _toast);
       if (drag != null) {
@@ -395,6 +448,7 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   }
 
   void _scaleUpdate(ScaleUpdateDetails d) {
+    if (_scaleIgnored) return;
     final drag = _maskDrag;
     if (drag != null) {
       drag.update(maskView, d.localFocalPoint);
@@ -406,8 +460,12 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   }
 
   void _scaleEnd(ScaleEndDetails d) {
+    if (_scaleIgnored) {
+      _scaleIgnored = false;
+      return;
+    }
     final drag = _maskDrag;
-    if (drag == null) {
+    if (drag == null || drag.isBrush) {
       _waitForFullSize();
       return;
     }
@@ -520,7 +578,7 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     if (base == null) return;
     // Only what the coverage depends on is in the key.
     final key =
-        '${p.id}|${identityHashCode(base)}|${base.width}x${base.height}|'
+        '${p.id}|$_fitSerial|${base.width}x${base.height}|'
         '${jsonEncode([for (final k in m.components) k.toJson()])}';
     if (key == _overlayKey) return;
     final raster = await (_rasterizer ??= MaskRasterizer.load());
@@ -722,6 +780,7 @@ class DevelopCanvasState extends State<DevelopCanvas> {
       }
       _fit?.dispose();
       _fit = img;
+      _fitSerial++;
       _fitKey = fitKey;
       _fitId = p.id;
       _update();
@@ -991,10 +1050,11 @@ class DevelopCanvasState extends State<DevelopCanvas> {
         final overlay = _overlayShown();
         final drag = _maskDrag;
         final painting = drag != null && drag.live && drag.painting;
-        final tappable = target is ColourRangeShape || target is BrushShape;
+        final tappable = target is ColourRangeShape;
         return Listener(
           onPointerSignal: _scroll,
           onPointerDown: _pointerDown,
+          onPointerMove: _pointerMove,
           onPointerUp: _pointerUp,
           onPointerCancel: _pointerUp,
           child: GestureDetector(
@@ -1003,9 +1063,16 @@ class DevelopCanvasState extends State<DevelopCanvas> {
             onScaleStart: _scaleStart,
             onScaleUpdate: _scaleUpdate,
             onScaleEnd: _scaleEnd,
-            onLongPressStart: (_) => c.setComparing(true),
-            onLongPressEnd: (_) => c.setComparing(false),
-            onLongPressCancel: () => c.setComparing(false),
+            // Holding still on a mask edit is not a press for the original.
+            onLongPressStart: target != null
+                ? null
+                : (_) => c.setComparing(true),
+            onLongPressEnd: target != null
+                ? null
+                : (_) => c.setComparing(false),
+            onLongPressCancel: target != null
+                ? null
+                : () => c.setComparing(false),
             child: RepaintBoundary(
               child: Stack(
                 children: [
