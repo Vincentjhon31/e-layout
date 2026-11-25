@@ -19,8 +19,8 @@ precision highp float;
 //    the largest radius), by 0.128 x radius / sigma: large discs are filled,
 //    not offset copies, and small ones stay crisp. The prefilter is an
 //    8-bit Gaussian of the encoded colour weighted by (1 - focus) and
-//    Boost (capped at 2x there, against banding), so a small highlight
-//    loses some of its light at large radii;
+//    Boost, dithered by +-0.5/255 against banding, so a small highlight
+//    loses a little of its light at large radii;
 //  - the transition is an exponent on the focus, (1 - focus)^(1 + t/50),
 //    not a distance ramp from the focus edge;
 //  - colours are averaged in linear light, but the image is the developed,
@@ -38,6 +38,8 @@ precision highp float;
 //    5           uBoost   Boost/25
 //    6           uPreK    0.128 / prefilter sigma (0 = no prefilter)
 //    7           uMode    0 = the blur, 1 = the prefilter's weighted input
+//    8, 9        uOrigin  output top-left in the whole photo, render px
+//   10           uScale   render px per full-resolution px
 // Samplers: 0 uSrc (the image so far), 1 uFocus (focus 0 to 1 in alpha),
 // 2 uPre (a Gaussian blur of the weighted input, or uSrc when uPreK is 0).
 // All are drawn images of the output's size.
@@ -49,6 +51,8 @@ uniform float uPower;
 uniform float uBoost;
 uniform float uPreK;
 uniform float uMode;
+uniform vec2 uOrigin;
+uniform float uScale;
 
 uniform sampler2D uSrc;
 uniform sampler2D uFocus;
@@ -84,6 +88,13 @@ vec3 toSrgb(vec3 c) {
   return mix(hi, lo, step(c, vec3(0.0031308)));
 }
 
+// "Hash without Sine" (Dave Hoskins, MIT), as in develop.frag: 0..1.
+float hash12(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
 // Boost's weight for a straight encoded colour: 1, up to 1 + uBoost for
 // white.
 float gain(vec3 s) {
@@ -96,18 +107,30 @@ void main() {
   vec4 c0 = texture(uSrc, uvOf(p));
   float f0 = clamp(texture(uFocus, uvOf(p)).a, 0.0, 1.0);
   vec3 s0 = c0.a > 0.0 ? c0.rgb / c0.a : vec3(0.0);
-  // The prefilter's largest Boost weight. Its weights are stored over gmax
-  // in 8-bit alpha, so gmax is capped at 2: at least 128 steps for an
-  // unboosted pixel, no visible bands. The taps' own weights keep the full
-  // Boost.
-  float gmax = min(1.0 + uBoost, 2.0);
+  // The largest Boost weight, so the prefilter's weights fit in 0..1.
+  float gmax = 1.0 + uBoost;
   if (uMode > 0.5) {
     // The prefilter's input: each pixel premultiplied by its weight, how far
-    // out of focus it is times its Boost weight capped at gmax (over gmax).
-    // Blurred, its rgb / a is the weighted mean colour and a x gmax the mean
-    // weight.
-    float wt = (1.0 - f0) * min(gain(s0), gmax) / gmax * c0.a;
-    fragColor = vec4(s0 * wt, wt);
+    // out of focus it is times its Boost weight (over gmax). Blurred, its
+    // rgb / a is the weighted mean colour and a x gmax the mean weight.
+    float wt = (1.0 - f0) * gain(s0) / gmax * c0.a;
+    vec4 o = vec4(s0 * wt, wt);
+    if (wt > 0.0) {
+      // At high Boost an unboosted weight is 1/gmax, few 8-bit steps: a
+      // dither of +-0.5/255 on colour and weight turns the bands into noise
+      // the blur averages away. Keyed on full-resolution position, so tiles
+      // and whole renders get the same values.
+      vec2 g = (uOrigin + p) / uScale;
+      vec4 d = vec4(
+        hash12(g),
+        hash12(g + vec2(37.0, 17.0)),
+        hash12(g + vec2(59.0, 83.0)),
+        hash12(g + vec2(101.0, 7.0))
+      );
+      o = clamp(o + (d - 0.5) / 255.0, 0.0, 1.0);
+      o.rgb = min(o.rgb, vec3(o.a));
+    }
+    fragColor = o;
     return;
   }
   float blur = 1.0 - f0;
@@ -118,13 +141,17 @@ void main() {
   }
   // How much each tap reads the prefilter: none for a small disc.
   float k = clamp(r * uPreK, 0.0, 1.0);
+  // The disc's pattern turns by a per-pixel angle keyed on full-resolution
+  // position (tiles match): the prefilter's 8-bit steps and any leftover
+  // ghost copies become fine noise instead of bands.
+  float turn = hash12((uOrigin + p) / uScale + vec2(211.0, 157.0)) * 6.2831853;
   vec4 acc = vec4(0.0);
   float wsum = 0.0;
   for (int i = 0; i < kTaps; i++) {
     float fi = float(i);
     // Even area per tap: radius grows with the square root of the index.
     float rr = r * sqrt((fi + 0.5) / float(kTaps));
-    float th = fi * kGoldenAngle;
+    float th = fi * kGoldenAngle + turn;
     vec2 q = clamp(p + rr * vec2(cos(th), sin(th)), vec2(0.5), uSize - 0.5);
     vec4 c = texture(uSrc, uvOf(q));
     float f = clamp(texture(uFocus, uvOf(q)).a, 0.0, 1.0);

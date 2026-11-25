@@ -198,23 +198,24 @@ void main() {
       final (mean, cv) = await disc();
       dev.debugLensPrefilter = false;
       final (rawMean, rawCv) = await disc();
-      // The prefilter caps Boost at 2x (against banding), so the disc is
-      // dimmer than the taps' alone, but plainly lit.
-      expect(mean, greaterThan(3), reason: 'the disc is lit');
+      expect(
+        mean,
+        greaterThanOrEqualTo(0.8 * rawMean),
+        reason: 'the disc keeps its light',
+      );
       expect(mean, lessThanOrEqualTo(rawMean + 1));
-      expect(cv, lessThan(0.5), reason: 'the disc is filled');
-      expect(cv, lessThan(rawCv / 3), reason: 'the taps alone leave dots');
+      expect(cv, lessThan(0.35), reason: 'the disc is filled');
+      expect(cv, lessThan(rawCv / 4), reason: 'the taps alone leave dots');
     });
   });
 
   testWidgets('a smooth gradient stays smooth at Boost 100', (t) async {
     await withDev(t, () async {
-      // A 256 px region of a 1000 px photo, all out of focus: radius 20 px,
-      // prefilter sigma 2.6 px. A gentle bright ramp (200 to 215), so Boost
-      // weighs in and 8-bit bands in the prefilter's weights would show as
-      // steps, dips or a drift from the taps alone.
-      const full = ui.Size(1000, 1000);
-      const origin = ui.Offset(372, 372);
+      // A gentle bright ramp (200 to 215), so Boost weighs in and 8-bit
+      // bands in the prefilter's weights would show as steps, dips or a
+      // drift from the taps alone. A 256 px region, all out of focus, of a
+      // 1000 px photo (radius 20 px, prefilter sigma 2.6 px) and of a
+      // 4000 px one (radius 80 px, sigma 10.4 px).
       final src = fillRgba(kSide, kSide, (x, y) {
         final v = (200 + 15 * x / 255).round();
         return (v, v, v);
@@ -222,24 +223,41 @@ void main() {
       final s = lensOn(
         LensBlur(amount: 100, focus: LensFocus.point, fx: 0, fy: 0, boost: 100),
       );
-      final out = await run(dev, src, s, origin: origin, fullSize: full);
-      dev.debugLensPrefilter = false;
-      final taps = await run(dev, src, s, origin: origin, fullSize: full);
-      var step = 0, falls = 0, drift = 0;
-      for (var y = 64; y < 192; y++) {
-        for (var x = 1; x < kSide; x++) {
-          final i = (y * kSide + x) * 4;
-          for (var k = 0; k < 3; k++) {
-            final d = out[i + k] - out[i - 4 + k];
-            step = math.max(step, d.abs());
-            if (d < 0) falls++;
-            drift = math.max(drift, (out[i + k] - taps[i + k]).abs());
+      for (final side in [1000.0, 4000.0]) {
+        final full = ui.Size(side, side);
+        final origin = ui.Offset(side / 2 - 128, side / 2 - 128);
+        dev.debugLensPrefilter = true;
+        final out = await run(dev, src, s, origin: origin, fullSize: full);
+        dev.debugLensPrefilter = false;
+        final taps = await run(dev, src, s, origin: origin, fullSize: full);
+        var step = 0, pixDrift = 0;
+        // Column means over 128 rows: the dither's noise averages out there,
+        // bands (the same in every row) do not.
+        final mo = List.filled(kSide, 0.0), mt = List.filled(kSide, 0.0);
+        for (var y = 64; y < 192; y++) {
+          for (var x = 0; x < kSide; x++) {
+            final i = (y * kSide + x) * 4;
+            for (var k = 0; k < 3; k++) {
+              if (x > 0) {
+                step = math.max(step, (out[i + k] - out[i - 4 + k]).abs());
+              }
+              pixDrift = math.max(pixDrift, (out[i + k] - taps[i + k]).abs());
+              mo[x] += out[i + k] / 384;
+              mt[x] += taps[i + k] / 384;
+            }
           }
         }
+        var fall = 0.0, drift = 0.0;
+        for (var x = 0; x < kSide; x++) {
+          if (x > 0) fall = math.max(fall, mo[x - 1] - mo[x]);
+          drift = math.max(drift, (mo[x] - mt[x]).abs());
+        }
+        final at = '$side px photo';
+        expect(step, lessThanOrEqualTo(2), reason: '$at: no step past 2');
+        expect(fall, lessThan(0.1), reason: '$at: the ramp only rises');
+        expect(drift, lessThan(1.05), reason: '$at: no drift');
+        expect(pixDrift, lessThanOrEqualTo(2), reason: '$at: dither noise');
       }
-      expect(step, lessThanOrEqualTo(2), reason: 'no step past 2 levels');
-      expect(falls, 0, reason: 'the ramp only rises');
-      expect(drift, lessThanOrEqualTo(1), reason: 'no drift from the taps');
     });
   });
 

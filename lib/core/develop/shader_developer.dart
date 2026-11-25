@@ -58,6 +58,8 @@ import 'settings.dart';
 //    5           uBoost   Boost/25
 //    6           uPreK    0.128 / prefilter sigma (0 = no prefilter)
 //    7           uMode    0 = the blur, 1 = the prefilter's weighted input
+//    8, 9        uOrigin  output top-left in the whole photo, render px
+//   10           uScale   render px per full-resolution px
 // Samplers: 0 uSrc (the image so far), 1 uFocus (the focus map), 2 uPre
 // (the weighted prefilter, or uSrc when off). All are drawn images.
 
@@ -517,7 +519,13 @@ class ShaderDeveloper implements PhotoDeveloper {
         if (focus != null) {
           final ui.Image next;
           try {
-            next = await _lensPass(cur, focus, lens);
+            next = await _lensPass(
+              cur,
+              focus,
+              lens,
+              origin: origin,
+              scale: scale,
+            );
           } finally {
             focus.dispose();
           }
@@ -845,16 +853,30 @@ class ShaderDeveloper implements PhotoDeveloper {
   /// shader in its weight mode. The shader divides, so the subject does not
   /// bleed back into the blur and boosted highlights keep their weight.
   /// Small radii read mostly [cur] and stay crisp.
+  ///
+  /// The weighted input is dithered (see lens_blur.frag), keyed on the
+  /// full-resolution position from [origin] and [scale].
   Future<ui.Image> _lensPass(
     ui.Image cur,
     ui.Image focus,
-    _LensPlan plan,
-  ) async {
+    _LensPlan plan, {
+    required ui.Offset origin,
+    required double scale,
+  }) async {
     final sigma = plan.preSigma;
     ui.Image? pre;
     try {
       if (debugLensPrefilter && sigma >= 0.5) {
-        final weighted = await _lensShade(cur, focus, cur, plan, 0, 1);
+        final weighted = await _lensShade(
+          cur,
+          focus,
+          cur,
+          plan,
+          0,
+          1,
+          origin,
+          scale,
+        );
         try {
           // The existing blur path, uncached: [cur] is new on every call.
           pre = await blurImage(weighted, sigma);
@@ -869,6 +891,8 @@ class ShaderDeveloper implements PhotoDeveloper {
         plan,
         pre == null ? 0 : 0.128 / sigma,
         0,
+        origin,
+        scale,
       );
     } finally {
       pre?.dispose();
@@ -883,6 +907,8 @@ class ShaderDeveloper implements PhotoDeveloper {
     _LensPlan plan,
     double preK,
     double mode,
+    ui.Offset origin,
+    double scale,
   ) async {
     final w = cur.width, h = cur.height;
     final sh = _lensProgram.fragmentShader();
@@ -897,6 +923,9 @@ class ShaderDeveloper implements PhotoDeveloper {
       f(plan.boost);
       f(preK);
       f(mode);
+      f(origin.dx);
+      f(origin.dy);
+      f(scale);
       // Taps fall between texels: bilinear. Reads at texel centres stay
       // exact, so in-focus pixels are unchanged.
       sh.setImageSampler(0, cur, filterQuality: ui.FilterQuality.low);
