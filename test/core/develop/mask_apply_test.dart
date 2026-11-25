@@ -465,6 +465,90 @@ void main() {
     );
   });
 
+  test(
+    'needsAutoMaps: visible automatic masks, or lens blur on the subject',
+    () {
+      Mask auto(
+        MaskShape shape, {
+        Map<Setting, double> adjust = const {Setting.exposure: 0.5},
+        bool visible = true,
+        String id = 'a',
+      }) => Mask(
+        id: id,
+        components: [MaskComponent(RadialShape()), MaskComponent(shape)],
+        adjust: adjust,
+        visible: visible,
+      );
+      EditSettings lens(LensFocus focus, {String? maskId, List<Mask>? masks}) =>
+          EditSettings.resolve([
+            SettingsPatch(
+              masks: masks,
+              lensBlur: LensBlur(amount: 50, focus: focus, maskId: maskId),
+            ),
+          ]);
+
+      expect(needsAutoMaps(withMasks([])), isFalse);
+      expect(
+        needsAutoMaps(
+          withMasks([
+            radial({Setting.exposure: 1}),
+          ]),
+        ),
+        isFalse,
+      );
+      for (final shape in const [
+        SubjectShape(),
+        SkyShape(),
+        BackgroundShape(),
+      ]) {
+        expect(
+          needsAutoMaps(withMasks([auto(shape)])),
+          isTrue,
+          reason: '$shape',
+        );
+        expect(
+          needsAutoMaps(withMasks([auto(shape, visible: false)])),
+          isFalse,
+          reason: 'hidden $shape',
+        );
+        expect(
+          needsAutoMaps(withMasks([auto(shape, adjust: const {})])),
+          isFalse,
+          reason: '$shape without an adjust',
+        );
+      }
+      // Lens blur: off, subject, point, a mask with or without automatic parts,
+      // and a missing mask (the subject).
+      expect(
+        needsAutoMaps(
+          EditSettings.resolve([
+            SettingsPatch(lensBlur: LensBlur(focus: LensFocus.subject)),
+          ]),
+        ),
+        isFalse,
+      );
+      expect(needsAutoMaps(lens(LensFocus.subject)), isTrue);
+      expect(needsAutoMaps(lens(LensFocus.point)), isFalse);
+      final plain = radial({}, id: 'plain');
+      final sky = auto(const SkyShape(), adjust: const {}, id: 'sky');
+      expect(
+        needsAutoMaps(
+          lens(LensFocus.mask, maskId: 'plain', masks: [plain, sky]),
+        ),
+        isFalse,
+      );
+      expect(
+        needsAutoMaps(lens(LensFocus.mask, maskId: 'sky', masks: [plain, sky])),
+        isTrue,
+        reason: 'the focus mask need not have an effect',
+      );
+      expect(
+        needsAutoMaps(lens(LensFocus.mask, maskId: 'gone', masks: [plain])),
+        isTrue,
+      );
+    },
+  );
+
   testWidgets('clearCache frees the masks colour tables', (t) async {
     await withDev(t, () async {
       final src = await image(richRgba(6));

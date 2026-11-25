@@ -2,7 +2,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/foundation.dart' show compute, visibleForTesting;
 
 import 'mask_raster.dart';
 import 'photo_developer.dart';
@@ -39,9 +39,14 @@ class AutoMaps implements AutoMapsSource {
   }
 }
 
+/// How many times [computeAutoMaps] has run, for tests.
+@visibleForTesting
+int debugAutoMapsComputed = 0;
+
 /// Computes the maps of [photo] (not disposed). The heavy maths runs in a
 /// background isolate.
 Future<AutoMaps> computeAutoMaps(ui.Image photo) async {
+  debugAutoMapsComputed++;
   final long = math.max(photo.width, photo.height);
   ui.Image? small;
   try {

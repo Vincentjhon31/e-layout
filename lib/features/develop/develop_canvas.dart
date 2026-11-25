@@ -422,6 +422,7 @@ class DevelopCanvasState extends State<DevelopCanvas> {
       ui.Image? out;
       if (!s.isNeutral) {
         final stats = await _statsFor(p, s);
+        final auto = await c.home.autoMapsFor(p, s);
         out = await c.developer.develop(
           fit,
           s,
@@ -430,6 +431,7 @@ class DevelopCanvasState extends State<DevelopCanvas> {
           fullSize: Size(w.toDouble(), h.toDouble()),
           lutSize: lut,
           stats: stats,
+          auto: auto,
         );
       }
       if (_disposed) {
@@ -565,6 +567,7 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     if (!s.isNeutral) {
       try {
         final stats = await _statsFor(p, s);
+        final auto = await c.home.autoMapsFor(p, s);
         out = await c.developer.develop(
           crop,
           s,
@@ -574,6 +577,7 @@ class DevelopCanvasState extends State<DevelopCanvas> {
           fullSize: fullSize,
           lutSize: 33,
           stats: stats,
+          auto: auto,
         );
       } finally {
         crop.dispose();

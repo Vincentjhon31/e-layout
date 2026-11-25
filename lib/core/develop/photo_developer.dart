@@ -82,6 +82,36 @@ bool needsStats(EditSettings s) =>
     s[Setting.dehaze] != 0 ||
     s.masks.any((m) => m.hasEffect && (m.adjust[Setting.dehaze] ?? 0) != 0);
 
+/// True when developing [s] reads the photo's automatic maps
+/// ([AutoMapsSource]): a mask with an effect that has a Subject, Sky or
+/// Background component, or a lens blur focused on the subject (directly,
+/// through a focus mask with such a component, or through a focus mask that
+/// is missing or empty, which means the subject). Callers compute the maps
+/// only then.
+bool needsAutoMaps(EditSettings s) {
+  bool usesAuto(Mask m) => m.components.any(
+    (c) =>
+        c.shape is SubjectShape ||
+        c.shape is SkyShape ||
+        c.shape is BackgroundShape,
+  );
+  if (s.masks.any((m) => m.hasEffect && usesAuto(m))) return true;
+  final l = s.lensBlur;
+  if (!l.isOn) return false;
+  switch (l.focus) {
+    case LensFocus.point:
+      return false;
+    case LensFocus.subject:
+      return true;
+    case LensFocus.mask:
+      // As ShaderDeveloper picks it: the first mask with that id and parts.
+      for (final m in s.masks) {
+        if (m.id == l.maskId && m.components.isNotEmpty) return usesAuto(m);
+      }
+      return true;
+  }
+}
+
 /// Global colour only, through [ColorPipeline] per pixel on the CPU, then
 /// each mask's tone and colour deltas mixed in by its coverage
 /// ([MaskRasterizer]). Effects and detail settings, global or in a mask, are

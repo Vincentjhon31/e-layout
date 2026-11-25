@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:pio_photo_layout/core/codec/jpeg_encoder.dart';
 import 'package:pio_photo_layout/core/codec/png_encoder.dart';
+import 'package:pio_photo_layout/core/develop/auto_masks.dart';
 import 'package:pio_photo_layout/core/develop/mask_raster.dart';
 import 'package:pio_photo_layout/core/develop/masks.dart';
 import 'package:pio_photo_layout/core/develop/photo_developer.dart';
@@ -57,6 +58,26 @@ Future<LayoutDoc> footerDoc() async => readLayout(
 
 EditSettings edits(Map<Setting, double> v) =>
     EditSettings.resolve([SettingsPatch(values: v)]);
+
+EditSettings maskEdits(List<Mask> masks, {LensBlur? lens}) =>
+    EditSettings.resolve([SettingsPatch(masks: masks, lensBlur: lens)]);
+
+/// A 3 px checkerboard over colour gradients: detail a lens blur visibly
+/// softens. Straight RGBA.
+Uint8List detailRgba(int w, int h) {
+  final b = Uint8List(w * h * 4);
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      final i = (y * w + x) * 4;
+      final on = (x ~/ 3 + y ~/ 3).isEven;
+      b[i] = 30 + x * 190 ~/ w;
+      b[i + 1] = on ? 190 : 60;
+      b[i + 2] = 40 + y * 170 ~/ h;
+      b[i + 3] = 255;
+    }
+  }
+  return b;
+}
 
 /// A smooth generated photo (gradients and soft waves, no fine detail that
 /// would alias when scaled down), straight RGBA.
@@ -154,6 +175,7 @@ class RecordingDeveloper extends CpuDeveloper {
 
   final int marginPx;
   final calls = <(ui.Offset, ui.Size?, double, DevelopStats?, int, int)>[];
+  final autos = <AutoMapsSource?>[];
   int cleared = 0;
 
   @override
@@ -166,6 +188,7 @@ class RecordingDeveloper extends CpuDeveloper {
       DevelopStats? stats,
       AutoMapsSource? auto}) {
     calls.add((origin, fullSize, scale, stats, src.width, src.height));
+    autos.add(auto);
     return super.develop(src, s, profile: profile, scale: scale, origin: origin,
         fullSize: fullSize, lutSize: lutSize, stats: stats, auto: auto);
   }
@@ -532,6 +555,220 @@ void main() {
           }
         } finally {
           dev.dispose();
+        }
+      });
+    });
+
+    // Review Focus 1: a brush mask and a lens blur focused on it, saved in
+    // 64 px tiles, match one whole render.
+    testWidgets('a brush mask with lens blur saved in 64 px tiles matches a whole render',
+        (tester) async {
+      await tester.runAsync(() async {
+        final dev = await ShaderDeveloper.load();
+        try {
+          const w = 300, h = 200;
+          final photo = encodePng(detailRgba(w, h), w, h);
+          final brush = Mask(
+            id: 'brush',
+            components: [
+              MaskComponent(BrushShape([
+                BrushStroke([(0.1, 0.45), (0.5, 0.55), (0.9, 0.45)], size: 0.08),
+              ])),
+            ],
+            adjust: {Setting.exposure: 0.7},
+          );
+          final s = maskEdits([brush],
+              lens: LensBlur(amount: 100, focus: LensFocus.mask, maskId: 'brush'));
+          expect(needsAutoMaps(s), isFalse);
+          const png = ExportSettings(format: OutputFormat.png);
+          final margin = dev.margin(s, 1, fullSize: const ui.Size(w + 0.0, h + 0.0));
+          final step = math.max(16, 64 - 2 * margin);
+          expect(step, lessThan(w), reason: 'the save is cut in tiles');
+          for (final force in [false, true]) {
+            final whole = pngRgba((await PhotoExporter(forcePixelPath: force, developer: dev)
+                    .render(photo, null, null, png, edit: s))
+                .bytes);
+            final tiled = pngRgba((await PhotoExporter(
+                        tileSize: 64, forcePixelPath: force, developer: dev)
+                    .render(photo, null, null, png, edit: s))
+                .bytes);
+            final noLens = pngRgba((await PhotoExporter(forcePixelPath: force, developer: dev)
+                    .render(photo, null, null, png, edit: maskEdits([brush])))
+                .bytes);
+            expect(rgbMeanDiff(whole, noLens), greaterThan(5),
+                reason: 'the lens blur changed the picture');
+            var worst = 0, over = 0;
+            for (var i = 0; i < whole.length; i++) {
+              if (i % 4 == 3) continue;
+              final d = (whole[i] - tiled[i]).abs();
+              worst = math.max(worst, d);
+              if (d > 2) over++;
+            }
+            // ignore: avoid_print
+            print('brush + lens tiles, pixel path $force: max diff $worst levels, '
+                '$over values past 2');
+            // Within 2 levels. The brush's soft edge is drawn per tile, and a
+            // level of coverage there moves the lens radius and the focus
+            // weights, so a stray value may land a level further (seen: 1 of
+            // 180,000, at 3).
+            expect(over, lessThanOrEqualTo(4), reason: 'pixel path $force');
+            expect(worst, lessThanOrEqualTo(3), reason: 'pixel path $force');
+            // No seam: the step across each tile edge is the whole render's.
+            double jump(Uint8List px, int x0, int y0, int x1, int y1) =>
+                (luma(px, w, x0, y0) - luma(px, w, x1, y1)).abs();
+            for (var x = step; x < w; x += step) {
+              var d = 0.0;
+              for (var y = 0; y < h; y++) {
+                d += (jump(tiled, x, y, x - 1, y) - jump(whole, x, y, x - 1, y)).abs();
+              }
+              expect(d / h, lessThan(1), reason: 'seam at x = $x, pixel path $force');
+            }
+            for (var y = step; y < h; y += step) {
+              var d = 0.0;
+              for (var x = 0; x < w; x++) {
+                d += (jump(tiled, x, y, x, y - 1) - jump(whole, x, y, x, y - 1)).abs();
+              }
+              expect(d / w, lessThan(1), reason: 'seam at y = $y, pixel path $force');
+            }
+          }
+        } finally {
+          dev.dispose();
+        }
+      });
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    // Review Focus 3: masks and the automatic maps are laid on the upright
+    // photo, so a sideways (EXIF 6) photo is edited where it is shown.
+    testWidgets('EXIF 6 photo: a radial mask in the upright top-left edits that corner',
+        (tester) async {
+      await tester.runAsync(() async {
+        final bytes = File('test/assets/exif_rotated_6.jpg').readAsBytesSync();
+        const png = ExportSettings(format: OutputFormat.png);
+        EditSettings corner(double cx, double cy) => maskEdits([
+              Mask(
+                id: 'corner',
+                components: [
+                  MaskComponent(RadialShape(cx: cx, cy: cy, rx: 0.2, ry: 0.15, feather: 20)),
+                ],
+                adjust: {Setting.exposure: 1.5},
+              ),
+            ]);
+        // Compared with the same mask in the upright bottom-right corner, so
+        // both saves go through the developer (an unedited save is drawn
+        // with cubic filtering, which moves a few of this JPEG's pixels).
+        final s = corner(0.15, 0.12), other = corner(0.85, 0.88);
+        final dev = await ShaderDeveloper.load();
+        try {
+          for (final force in [false, true]) {
+            final ex = PhotoExporter(tileSize: 32, forcePixelPath: force, developer: dev);
+            final base = pngRgba((await ex.render(bytes, null, null, png, edit: other)).bytes);
+            final saved = pngRgba((await ex.render(bytes, null, null, png, edit: s)).bytes);
+            expect(saved.length, 80 * 120 * 4, reason: 'upright 80 x 120');
+            double gain(int x, int y) => luma(saved, 80, x, y) - luma(base, 80, x, y);
+            expect(gain(6, 6), greaterThan(15), reason: 'top-left, pixel path $force');
+            for (final (x, y) in [(73, 6), (6, 113), (40, 60)]) {
+              expect(gain(x, y).abs(), lessThan(3), reason: '($x, $y), pixel path $force');
+            }
+          }
+        } finally {
+          dev.dispose();
+        }
+        // The automatic maps are made from the upright photo too.
+        final subject = maskEdits([
+          Mask(
+            id: 'subject',
+            components: [const MaskComponent(SubjectShape())],
+            adjust: {Setting.exposure: 0.3},
+          ),
+        ]);
+        for (final force in [false, true]) {
+          final rec = RecordingDeveloper(0);
+          await PhotoExporter(tileSize: 64, forcePixelPath: force, developer: rec)
+              .render(bytes, null, null, png, edit: subject);
+          final maps = rec.autos.first;
+          expect(maps, isNotNull, reason: 'pixel path $force');
+          expect(maps!.subject.height, greaterThan(maps.subject.width),
+              reason: 'portrait, pixel path $force');
+        }
+      });
+    });
+
+    testWidgets('AutoMaps are computed once per photo for a 4-tile save', (tester) async {
+      await tester.runAsync(() async {
+        final s = maskEdits([
+          Mask(
+            id: 'sky',
+            components: [const MaskComponent(SkyShape())],
+            adjust: {Setting.exposure: 0.5},
+          ),
+        ]);
+        expect(needsAutoMaps(s), isTrue);
+        for (final force in [false, true]) {
+          // 80 x 60 in 44 px steps (64 px tiles, 10 px margins): 2 x 2 tiles.
+          final dev = RecordingDeveloper();
+          final before = debugAutoMapsComputed;
+          await PhotoExporter(tileSize: 64, forcePixelPath: force, developer: dev)
+              .render(photoPng(80, 60), null, null, const ExportSettings(), edit: s);
+          expect(dev.calls, hasLength(4));
+          expect(debugAutoMapsComputed - before, 1, reason: 'pixel path $force');
+          final maps = dev.autos.first;
+          expect(maps, isA<AutoMaps>());
+          for (final a in dev.autos) {
+            expect(identical(a, maps), isTrue, reason: 'every tile gets the same maps');
+          }
+          expect((maps! as AutoMaps).subject.debugDisposed, isTrue,
+              reason: 'freed after the save');
+        }
+        // Maps passed in are used as they are, and stay the caller's.
+        final photo = await imageFromRgba(smoothRgba(80, 60), 80, 60);
+        final mine = await computeAutoMaps(photo);
+        photo.dispose();
+        try {
+          final dev = RecordingDeveloper();
+          final before = debugAutoMapsComputed;
+          await PhotoExporter(tileSize: 64, developer: dev).render(
+              photoPng(80, 60), null, null, const ExportSettings(),
+              edit: s, auto: mine);
+          expect(debugAutoMapsComputed, before, reason: 'not computed again');
+          expect(dev.autos.every((a) => identical(a, mine)), isTrue);
+          expect(mine.subject.debugDisposed, isFalse);
+          expect(mine.sky.debugDisposed, isFalse);
+        } finally {
+          mine.dispose();
+        }
+      });
+    });
+
+    testWidgets('a photo without automatic masks never computes AutoMaps', (tester) async {
+      await tester.runAsync(() async {
+        final brush = Mask(
+          id: 'brush',
+          components: [
+            MaskComponent(BrushShape([BrushStroke([(0.2, 0.5), (0.8, 0.5)])])),
+          ],
+          adjust: {Setting.exposure: 0.5},
+        );
+        final hiddenSky = Mask(
+          id: 'sky',
+          components: [const MaskComponent(SkyShape())],
+          adjust: {Setting.exposure: 0.5},
+          visible: false,
+        );
+        for (final s in [
+          maskEdits([brush, hiddenSky]),
+          maskEdits([brush], lens: LensBlur(amount: 50, focus: LensFocus.point)),
+          maskEdits([brush], lens: LensBlur(amount: 50, focus: LensFocus.mask, maskId: 'brush')),
+        ]) {
+          expect(needsAutoMaps(s), isFalse);
+          for (final force in [false, true]) {
+            final dev = RecordingDeveloper();
+            final before = debugAutoMapsComputed;
+            await PhotoExporter(tileSize: 64, forcePixelPath: force, developer: dev)
+                .render(photoPng(80, 60), null, null, const ExportSettings(), edit: s);
+            expect(dev.calls, isNotEmpty);
+            expect(debugAutoMapsComputed, before, reason: 'pixel path $force');
+            expect(dev.autos.every((a) => a == null), isTrue);
+          }
         }
       });
     });

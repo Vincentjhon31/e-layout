@@ -1,10 +1,16 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:pio_photo_layout/core/codec/png_encoder.dart';
+import 'package:pio_photo_layout/core/develop/auto_masks.dart';
+import 'package:pio_photo_layout/core/develop/mask_raster.dart';
+import 'package:pio_photo_layout/core/develop/masks.dart';
 import 'package:pio_photo_layout/core/develop/photo_developer.dart';
+import 'package:pio_photo_layout/core/develop/profile_table.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
 import 'package:pio_photo_layout/core/model/layout_doc.dart';
 import 'package:pio_photo_layout/core/store/batch_store.dart';
@@ -89,6 +95,37 @@ Future<void> until(bool Function() ok) async {
     await Future<void>.delayed(const Duration(milliseconds: 1));
   }
   expect(ok(), isTrue, reason: 'timed out waiting');
+}
+
+/// Colour through [CpuDeveloper]; records the automatic maps of each call.
+class AutoRecordingDeveloper extends CpuDeveloper {
+  final autos = <AutoMapsSource?>[];
+
+  @override
+  Future<ui.Image> develop(
+    ui.Image src,
+    EditSettings s, {
+    ProfileTable? profile,
+    double scale = 1,
+    ui.Offset origin = ui.Offset.zero,
+    ui.Size? fullSize,
+    int lutSize = 33,
+    DevelopStats? stats,
+    AutoMapsSource? auto,
+  }) {
+    autos.add(auto);
+    return super.develop(
+      src,
+      s,
+      profile: profile,
+      scale: scale,
+      origin: origin,
+      fullSize: fullSize,
+      lutSize: lutSize,
+      stats: stats,
+      auto: auto,
+    );
+  }
 }
 
 class Stores {
@@ -710,6 +747,161 @@ void main() {
         contains("Photo editing isn't available on this phone."),
       );
       none.dispose();
+    });
+  });
+  group('automatic maps', () {
+    SettingsPatch skyMask() => SettingsPatch(
+      masks: [
+        Mask(
+          id: 'sky',
+          components: [const MaskComponent(SkyShape())],
+          adjust: {Setting.exposure: 0.5},
+        ),
+      ],
+    );
+
+    testWidgets('computed once per photo, shared by thumbnails and saves', (
+      tester,
+    ) async {
+      await tester.runAsync(() async {
+        final dev = AutoRecordingDeveloper();
+        final r = Rig(Stores(), developer: dev);
+        final c = r.controller;
+        await c.init();
+        await c.addPhotos([
+          picked('a.png', encodePng(grey(48, 32, 90), 48, 32)),
+          picked('b.png', encodePng(grey(48, 32, 90), 48, 32)),
+        ]);
+        await c.whenIdle();
+        final [p1, p2] = c.photos;
+        final before = debugAutoMapsComputed;
+        expect(await c.autoMapsFor(p1), isNull, reason: 'not needed yet');
+        await c.setLook(c.look.withPhotoPatch(p1.id, skyMask()));
+        await c.whenIdle();
+        // Two calls at once share one computation.
+        final both = await Future.wait([c.autoMapsFor(p1), c.autoMapsFor(p1)]);
+        final maps = both.first;
+        expect(maps, isNotNull);
+        expect(identical(both.last, maps), isTrue);
+        expect(debugAutoMapsComputed - before, 1);
+        expect(await c.autoMapsFor(p2), isNull, reason: 'p2 has no sky mask');
+        // The thumbnail was developed with them.
+        expect(p1.developed, isNotNull);
+        expect(dev.autos.any((a) => identical(a, maps)), isTrue);
+        // Saves pass them on instead of computing their own.
+        dev.autos.clear();
+        await c.saveAll();
+        expect(r.saver.names, hasLength(2));
+        await c.saveOne(p1);
+        expect(
+          debugAutoMapsComputed - before,
+          1,
+          reason: 'never computed again',
+        );
+        expect(dev.autos, isNotEmpty);
+        expect(
+          dev.autos.where((a) => a != null).every((a) => identical(a, maps)),
+          isTrue,
+        );
+        expect(maps!.subject.debugDisposed, isFalse, reason: 'still cached');
+        // Removing the photo frees them.
+        await c.removePhoto(p1.id);
+        expect(maps.subject.debugDisposed, isTrue);
+        expect(maps.sky.debugDisposed, isTrue);
+        c.dispose();
+      });
+    });
+
+    testWidgets('a photo without automatic masks never computes them', (
+      tester,
+    ) async {
+      await tester.runAsync(() async {
+        final dev = AutoRecordingDeveloper();
+        final r = Rig(Stores(), developer: dev);
+        final c = r.controller;
+        await c.init();
+        await c.addPhotos([
+          picked('a.png', encodePng(grey(48, 32, 90), 48, 32)),
+        ]);
+        await c.whenIdle();
+        final p = c.photos.single;
+        final before = debugAutoMapsComputed;
+        await c.setLook(
+          c.look.withPhotoPatch(
+            p.id,
+            SettingsPatch(
+              values: {Setting.exposure: 0.4},
+              masks: [
+                Mask(
+                  id: 'r',
+                  components: [MaskComponent(RadialShape())],
+                  adjust: {Setting.exposure: 0.5},
+                ),
+              ],
+              lensBlur: LensBlur(amount: 40, focus: LensFocus.point),
+            ),
+          ),
+        );
+        await c.whenIdle();
+        expect(p.developed, isNotNull);
+        expect(await c.autoMapsFor(p), isNull);
+        await c.saveAll();
+        await c.saveOne(p);
+        expect(debugAutoMapsComputed, before);
+        expect(dev.autos, isNotEmpty);
+        expect(dev.autos.every((a) => a == null), isTrue);
+        c.dispose();
+      });
+    });
+
+    testWidgets('clear and dispose free them', (tester) async {
+      await tester.runAsync(() async {
+        final c = Rig(Stores(), developer: CpuDeveloper()).controller;
+        await c.init();
+        await c.addPhotos([
+          picked('a.png', encodePng(grey(48, 32, 90), 48, 32)),
+        ]);
+        await c.whenIdle();
+        var p = c.photos.single;
+        await c.setLook(c.look.withPhotoPatch(p.id, skyMask()));
+        await c.whenIdle();
+        final first = (await c.autoMapsFor(p))!;
+        await c.clearPhotos();
+        expect(first.subject.debugDisposed, isTrue);
+
+        await c.addPhotos([
+          picked('b.png', encodePng(grey(48, 32, 90), 48, 32)),
+        ]);
+        await c.whenIdle();
+        p = c.photos.single;
+        await c.setLook(c.look.withPhotoPatch(p.id, skyMask()));
+        await c.whenIdle();
+        final second = (await c.autoMapsFor(p))!;
+        expect(second.subject.debugDisposed, isFalse);
+        c.dispose();
+        expect(second.subject.debugDisposed, isTrue);
+      });
+    });
+
+    testWidgets('an EXIF 6 photo gets upright maps', (tester) async {
+      await tester.runAsync(() async {
+        final c = Rig(Stores(), developer: CpuDeveloper()).controller;
+        await c.init();
+        await c.addPhotos([
+          picked(
+            'turned.jpg',
+            File('test/assets/exif_rotated_6.jpg').readAsBytesSync(),
+          ),
+        ]);
+        await c.whenIdle();
+        final p = c.photos.single;
+        expect([p.width, p.height], [80, 120]);
+        await c.setLook(c.look.withPhotoPatch(p.id, skyMask()));
+        await c.whenIdle();
+        final maps = (await c.autoMapsFor(p))!;
+        expect(maps.subject.height, greaterThan(maps.subject.width));
+        c.dispose();
+      });
     });
   });
 }

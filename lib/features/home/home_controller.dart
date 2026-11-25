@@ -7,7 +7,9 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 
 import '../../core/analysis/frame_split.dart';
+import '../../core/develop/auto_masks.dart';
 import '../../core/develop/batch_look.dart';
+import '../../core/develop/mask_raster.dart';
 import '../../core/develop/photo_developer.dart';
 import '../../core/develop/profile_table.dart';
 import '../../core/develop/settings.dart';
@@ -88,6 +90,19 @@ class PhotoItem {
   /// The settings and profile [developed] was made with.
   String? developedKey;
   String? error;
+}
+
+/// One photo's automatic maps while they are computed and after.
+class _MapsEntry {
+  late final Future<AutoMaps?> future;
+  AutoMaps? maps;
+  bool freed = false;
+
+  void free() {
+    freed = true;
+    maps?.dispose();
+    maps = null;
+  }
 }
 
 /// A note under the layout row (the web app's notices).
@@ -656,6 +671,7 @@ class HomeController extends ChangeNotifier {
     _developing = p;
     try {
       if (!s.isNeutral) {
+        final auto = await autoMapsFor(p);
         next = await dev.develop(
           src,
           s,
@@ -663,6 +679,7 @@ class HomeController extends ChangeNotifier {
           scale: src.width / p.width,
           fullSize: ui.Size(src.width.toDouble(), src.height.toDouble()),
           lutSize: 33,
+          auto: auto,
         );
       }
     } catch (e) {
@@ -693,13 +710,57 @@ class HomeController extends ChangeNotifier {
     });
   }
 
-  /// Frees [p]'s images (left to the develop job while it uses them).
+  /// Frees [p]'s images and automatic maps (left to the develop job while it
+  /// uses them).
   void _release(PhotoItem p) {
     if (identical(p, _developing)) return;
     p.preview?.dispose();
     p.preview = null;
     p.developed?.dispose();
     p.developed = null;
+    _autoMaps.remove(p.id)?.free();
+  }
+
+  // Each photo's automatic maps, by photo id, made when first needed.
+  final Map<int, _MapsEntry> _autoMaps = {};
+
+  /// [p]'s automatic maps (Subject and Sky) for previews and saves. They are
+  /// computed once, from the photo's upright preview, the first time its
+  /// settings need them ([needsAutoMaps]; [settings] stands for its settings
+  /// when given, such as the editor's while a slider moves), and freed with
+  /// the photo (removePhoto, clearPhotos, dispose). Calls at the same time
+  /// share one computation. Null when the settings do not need them, before the
+  /// preview is ready and when they could not be computed.
+  Future<AutoMapsSource?> autoMapsFor(PhotoItem p, [EditSettings? settings]) {
+    final have = _autoMaps[p.id];
+    if (have != null) return have.future;
+    final src = p.preview;
+    if (_disposed ||
+        src == null ||
+        !photos.contains(p) ||
+        !needsAutoMaps(settings ?? settingsFor(p))) {
+      return Future.value(null);
+    }
+    // Its own handle, so freeing the preview meanwhile is safe.
+    final copy = src.clone();
+    final entry = _MapsEntry();
+    entry.future = () async {
+      try {
+        final maps = await computeAutoMaps(copy);
+        if (entry.freed) {
+          maps.dispose();
+          return null;
+        }
+        return entry.maps = maps;
+      } catch (e) {
+        debugPrint('Could not find the subject and sky of ${p.name}: $e');
+        return null;
+      } finally {
+        copy.dispose();
+      }
+    }();
+    _autoMaps[p.id] = entry;
+    return entry.future;
   }
 
   Future<void> removePhoto(int id) async {
@@ -1186,11 +1247,17 @@ class HomeController extends ChangeNotifier {
 
   /// Renders [p] with its own settings; exactly as before when editing is
   /// off or the settings are neutral.
-  Future<RenderedPhoto> _render(PhotoItem p, Uint8List bytes, LayoutItem item) {
+  Future<RenderedPhoto> _render(
+    PhotoItem p,
+    Uint8List bytes,
+    LayoutItem item,
+  ) async {
     final s = developer == null ? null : settingsFor(p);
     if (s == null || s.isNeutral) {
       return exporter.render(bytes, item.doc, item.prep, exportSettings);
     }
+    // The cached maps, so the exporter does not compute them again.
+    final auto = await autoMapsFor(p);
     return exporter.render(
       bytes,
       item.doc,
@@ -1198,6 +1265,7 @@ class HomeController extends ChangeNotifier {
       exportSettings,
       edit: s,
       profile: profileFor(s),
+      auto: auto,
     );
   }
 

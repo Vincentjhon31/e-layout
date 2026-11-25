@@ -7,6 +7,8 @@ import 'package:image/image.dart' as img;
 
 import '../codec/jpeg_encoder.dart';
 import '../codec/png_encoder.dart';
+import '../develop/auto_masks.dart';
+import '../develop/mask_raster.dart';
 import '../develop/photo_developer.dart';
 import '../develop/profile_table.dart';
 import '../develop/settings.dart';
@@ -90,6 +92,11 @@ class PhotoExporter {
   /// neutral), each tile is cut from the upright photo with the developer's
   /// margin on every side, developed in whole-photo coordinates, cropped back
   /// and the layout drawn on top. Null or neutral edits give today's bytes.
+  ///
+  /// [auto] is the photo's automatic maps when the caller already has them
+  /// (they stay the caller's). When the edits need them ([needsAutoMaps]) and
+  /// none are given, they are computed once from a small copy of the upright
+  /// photo, given to every tile and freed at the end.
   Future<RenderedPhoto> render(
     Uint8List photoBytes,
     LayoutDoc? doc,
@@ -97,6 +104,7 @@ class PhotoExporter {
     ExportSettings settings, {
     EditSettings? edit,
     ProfileTable? profile,
+    AutoMapsSource? auto,
   }) async {
     final e = edit == null || edit.isNeutral ? null : edit;
     final dev = developer;
@@ -146,14 +154,31 @@ class PhotoExporter {
     final fullBytes = pixels?.getBytes(order: img.ChannelOrder.rgba);
     final g = photoGeometry(pw, ph, doc);
     final out = Uint8List(g.w * g.h * 4);
+    AutoMaps? ownMaps;
     try {
       // Edits are computed on the whole upright photo: scale 1, its full size,
       // and whole-photo values measured once on a small copy.
       final fullSize = ui.Size(pw.toDouble(), ph.toDouble());
       final margin = e == null ? 0 : dev!.margin(e, 1, fullSize: fullSize);
-      final stats = e != null && needsStats(e)
-          ? await _measure(src, pixels)
-          : null;
+      // Whole-photo values and the automatic maps come from one small copy
+      // of the upright photo, made once per photo.
+      final wantStats = e != null && needsStats(e);
+      final wantMaps = e != null && auto == null && needsAutoMaps(e);
+      DevelopStats? stats;
+      if (wantStats || wantMaps) {
+        final small = await _smallCopy(
+          src,
+          pixels,
+          wantStats ? 512 : kAutoMapEdge,
+        );
+        try {
+          if (wantStats) stats = await measureStats(small);
+          if (wantMaps) ownMaps = await computeAutoMaps(small);
+        } finally {
+          small.dispose();
+        }
+      }
+      final maps = e == null ? null : auto ?? ownMaps;
       // An edited tile is sent to the developer with its margin on every side,
       // so it steps by less than [tileSize] to keep the whole piece within it.
       // Phones on Impeller's OpenGL ES backend gave back empty (white) tiles
@@ -203,6 +228,7 @@ class PhotoExporter {
                   origin: ui.Offset(x0.toDouble(), y0.toDouble()),
                   fullSize: fullSize,
                   stats: stats,
+                  auto: maps,
                 );
               } finally {
                 cut.dispose();
@@ -282,6 +308,7 @@ class PhotoExporter {
     } finally {
       src?.dispose();
       if (e != null) dev!.clearCache();
+      ownMaps?.dispose();
     }
 
     final bytes = await compute(
@@ -309,33 +336,29 @@ class PhotoExporter {
         ),
       );
 
-  /// Whole-photo values, measured on a copy of about 512 px on the long edge
-  /// of the upright photo ([src], or [pixels] on the pixel path).
-  Future<DevelopStats> _measure(ui.Image? src, img.Image? pixels) async {
+  /// A copy of the upright photo ([src], or [pixels] on the pixel path) at
+  /// most [edge] px on its long edge, for the whole-photo values and the
+  /// automatic maps. The caller disposes it.
+  Future<ui.Image> _smallCopy(
+    ui.Image? src,
+    img.Image? pixels,
+    int edge,
+  ) async {
     final w = src?.width ?? pixels!.width, h = src?.height ?? pixels!.height;
-    final k = math.min(512 / math.max(w, h), 1.0);
+    final k = math.min(edge / math.max(w, h), 1.0);
     final sw = math.max((w * k).round(), 1), sh = math.max((h * k).round(), 1);
-    final ui.Image small;
-    if (src != null) {
-      small = await scaleImage(src, sw, sh);
-    } else {
-      final resized = img.copyResize(
-        pixels!,
-        width: sw,
-        height: sh,
-        interpolation: img.Interpolation.average,
-      );
-      small = await imageFromRgba(
-        resized.getBytes(order: img.ChannelOrder.rgba),
-        sw,
-        sh,
-      );
-    }
-    try {
-      return await measureStats(small);
-    } finally {
-      small.dispose();
-    }
+    if (src != null) return scaleImage(src, sw, sh);
+    final resized = img.copyResize(
+      pixels!,
+      width: sw,
+      height: sh,
+      interpolation: img.Interpolation.average,
+    );
+    return imageFromRgba(
+      resized.getBytes(order: img.ChannelOrder.rgba),
+      sw,
+      sh,
+    );
   }
 
   Future<ui.Image> _tileImage(
