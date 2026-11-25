@@ -98,8 +98,13 @@ Future<void> until(bool Function() ok) async {
 }
 
 /// Colour through [CpuDeveloper]; records the automatic maps of each call.
+/// With [gate] set, each call waits for it (after signalling [started]) and
+/// records whether the maps it was given had been disposed meanwhile.
 class AutoRecordingDeveloper extends CpuDeveloper {
   final autos = <AutoMapsSource?>[];
+  Completer<void>? gate;
+  Completer<void>? started;
+  final disposedAtUse = <bool>[];
 
   @override
   Future<ui.Image> develop(
@@ -112,8 +117,16 @@ class AutoRecordingDeveloper extends CpuDeveloper {
     int lutSize = 33,
     DevelopStats? stats,
     AutoMapsSource? auto,
-  }) {
+  }) async {
     autos.add(auto);
+    final g = gate;
+    if (g != null) {
+      if (started?.isCompleted == false) started!.complete();
+      await g.future;
+      disposedAtUse.add(
+        auto != null && (auto.subject.debugDisposed || auto.sky.debugDisposed),
+      );
+    }
     return super.develop(
       src,
       s,
@@ -778,16 +791,26 @@ void main() {
         expect(await c.autoMapsFor(p1), isNull, reason: 'not needed yet');
         await c.setLook(c.look.withPhotoPatch(p1.id, skyMask()));
         await c.whenIdle();
-        // Two calls at once share one computation.
+        // Two calls at once share one computation; each gets its own clone.
         final both = await Future.wait([c.autoMapsFor(p1), c.autoMapsFor(p1)]);
         final maps = both.first;
         expect(maps, isNotNull);
-        expect(identical(both.last, maps), isTrue);
+        expect(identical(both.last, maps), isFalse);
+        final cached = c.debugCachedAutoMaps(p1)!;
+        for (final m in both) {
+          expect(m!.subject.isCloneOf(cached.subject), isTrue);
+          expect(m.sky.isCloneOf(cached.sky), isTrue);
+        }
+        both.last!.dispose();
         expect(debugAutoMapsComputed - before, 1);
         expect(await c.autoMapsFor(p2), isNull, reason: 'p2 has no sky mask');
-        // The thumbnail was developed with them.
+        // The thumbnail was developed with a clone, freed afterwards.
         expect(p1.developed, isNotNull);
-        expect(dev.autos.any((a) => identical(a, maps)), isTrue);
+        final thumb = dev.autos.whereType<AutoMaps>().where(
+          (a) => a.subject.isCloneOf(cached.subject),
+        );
+        expect(thumb, isNotEmpty);
+        expect(thumb.every((a) => a.subject.debugDisposed), isTrue);
         // Saves pass them on instead of computing their own.
         dev.autos.clear();
         await c.saveAll();
@@ -799,15 +822,20 @@ void main() {
           reason: 'never computed again',
         );
         expect(dev.autos, isNotEmpty);
-        expect(
-          dev.autos.where((a) => a != null).every((a) => identical(a, maps)),
-          isTrue,
-        );
-        expect(maps!.subject.debugDisposed, isFalse, reason: 'still cached');
-        // Removing the photo frees them.
+        final given = dev.autos.whereType<AutoMaps>();
+        expect(given, isNotEmpty);
+        for (final a in given) {
+          expect(a.subject.isCloneOf(cached.subject), isTrue);
+          expect(a.subject.debugDisposed, isTrue, reason: 'clone freed');
+        }
+        expect(cached.subject.debugDisposed, isFalse, reason: 'still cached');
+        // Removing the photo frees the cache; a clone stays its owner's.
         await c.removePhoto(p1.id);
-        expect(maps.subject.debugDisposed, isTrue);
-        expect(maps.sky.debugDisposed, isTrue);
+        expect(cached.subject.debugDisposed, isTrue);
+        expect(cached.sky.debugDisposed, isTrue);
+        expect(maps!.subject.debugDisposed, isFalse);
+        expect(await c.autoMapsFor(p1), isNull, reason: 'gone with the photo');
+        maps.dispose();
         c.dispose();
       });
     });
@@ -865,7 +893,8 @@ void main() {
         var p = c.photos.single;
         await c.setLook(c.look.withPhotoPatch(p.id, skyMask()));
         await c.whenIdle();
-        final first = (await c.autoMapsFor(p))!;
+        (await c.autoMapsFor(p))!.dispose();
+        final first = c.debugCachedAutoMaps(p)!;
         await c.clearPhotos();
         expect(first.subject.debugDisposed, isTrue);
 
@@ -876,12 +905,68 @@ void main() {
         p = c.photos.single;
         await c.setLook(c.look.withPhotoPatch(p.id, skyMask()));
         await c.whenIdle();
-        final second = (await c.autoMapsFor(p))!;
+        (await c.autoMapsFor(p))!.dispose();
+        final second = c.debugCachedAutoMaps(p)!;
         expect(second.subject.debugDisposed, isFalse);
         c.dispose();
         expect(second.subject.debugDisposed, isTrue);
       });
     });
+
+    // A photo removed or cleared while a save still renders with its maps:
+    // the save keeps working on its own clone, and the cache is freed.
+    for (final how in ['removed', 'cleared']) {
+      testWidgets('a photo $how mid-save keeps its maps until the save ends', (
+        tester,
+      ) async {
+        await tester.runAsync(() async {
+          final dev = AutoRecordingDeveloper();
+          final r = Rig(Stores(), developer: dev);
+          final c = r.controller;
+          await c.init();
+          await c.addPhotos([
+            picked('a.png', encodePng(grey(48, 32, 90), 48, 32)),
+          ]);
+          await c.whenIdle();
+          final p = c.photos.single;
+          await c.setLook(c.look.withPhotoPatch(p.id, skyMask()));
+          await c.whenIdle();
+          final cached = c.debugCachedAutoMaps(p)!;
+          dev.autos.clear();
+          dev
+            ..gate = Completer<void>()
+            ..started = Completer<void>();
+          final saving = c.saveOne(p);
+          await dev.started!.future;
+          if (how == 'removed') {
+            await c.removePhoto(p.id);
+          } else {
+            await c.clearPhotos();
+          }
+          expect(c.photos, isEmpty);
+          expect(cached.subject.debugDisposed, isTrue, reason: 'cache freed');
+          expect(cached.sky.debugDisposed, isTrue);
+          dev.gate!.complete();
+          expect(await saving, isNotNull);
+          expect(r.saver.names, hasLength(1));
+          expect(dev.disposedAtUse, isNotEmpty);
+          expect(
+            dev.disposedAtUse,
+            everyElement(isFalse),
+            reason: 'the save never read freed maps',
+          );
+          final used = dev.autos.whereType<AutoMaps>().toList();
+          expect(used, isNotEmpty);
+          expect(used.first.subject.isCloneOf(cached.subject), isTrue);
+          expect(
+            used.every((a) => a.subject.debugDisposed && a.sky.debugDisposed),
+            isTrue,
+            reason: 'the save freed its clone when done',
+          );
+          c.dispose();
+        });
+      });
+    }
 
     testWidgets('an EXIF 6 photo gets upright maps', (tester) async {
       await tester.runAsync(() async {
@@ -900,6 +985,7 @@ void main() {
         await c.whenIdle();
         final maps = (await c.autoMapsFor(p))!;
         expect(maps.subject.height, greaterThan(maps.subject.width));
+        maps.dispose();
         c.dispose();
       });
     });

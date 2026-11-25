@@ -33,6 +33,14 @@ class AutoMaps implements AutoMapsSource {
   final ui.Image sky;
   final (double, double) subjectPoint;
 
+  /// New handles to the same maps (the textures are shared until every
+  /// handle is disposed). The caller disposes the clone.
+  AutoMaps clone() => AutoMaps(
+    subject: subject.clone(),
+    sky: sky.clone(),
+    subjectPoint: subjectPoint,
+  );
+
   void dispose() {
     subject.dispose();
     sky.dispose();

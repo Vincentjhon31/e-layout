@@ -402,15 +402,19 @@ class _ViewerPageState extends State<_ViewerPage> {
     ui.Image? out;
     try {
       final auto = await home.autoMapsFor(photo);
-      out = await dev.develop(
-        img,
-        s,
-        profile: profile,
-        scale: img.width / photo.width,
-        fullSize: Size(img.width.toDouble(), img.height.toDouble()),
-        lutSize: 33,
-        auto: auto,
-      );
+      try {
+        out = await dev.develop(
+          img,
+          s,
+          profile: profile,
+          scale: img.width / photo.width,
+          fullSize: Size(img.width.toDouble(), img.height.toDouble()),
+          lutSize: 33,
+          auto: auto,
+        );
+      } finally {
+        auto?.dispose();
+      }
     } catch (_) {
       // The undeveloped image stays.
     } finally {

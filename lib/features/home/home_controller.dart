@@ -9,7 +9,6 @@ import 'package:flutter/foundation.dart';
 import '../../core/analysis/frame_split.dart';
 import '../../core/develop/auto_masks.dart';
 import '../../core/develop/batch_look.dart';
-import '../../core/develop/mask_raster.dart';
 import '../../core/develop/photo_developer.dart';
 import '../../core/develop/profile_table.dart';
 import '../../core/develop/settings.dart';
@@ -672,15 +671,19 @@ class HomeController extends ChangeNotifier {
     try {
       if (!s.isNeutral) {
         final auto = await autoMapsFor(p);
-        next = await dev.develop(
-          src,
-          s,
-          profile: profileFor(s),
-          scale: src.width / p.width,
-          fullSize: ui.Size(src.width.toDouble(), src.height.toDouble()),
-          lutSize: 33,
-          auto: auto,
-        );
+        try {
+          next = await dev.develop(
+            src,
+            s,
+            profile: profileFor(s),
+            scale: src.width / p.width,
+            fullSize: ui.Size(src.width.toDouble(), src.height.toDouble()),
+            lutSize: 33,
+            auto: auto,
+          );
+        } finally {
+          auto?.dispose();
+        }
       }
     } catch (e) {
       debugPrint('Could not develop ${p.name}: $e');
@@ -724,22 +727,34 @@ class HomeController extends ChangeNotifier {
   // Each photo's automatic maps, by photo id, made when first needed.
   final Map<int, _MapsEntry> _autoMaps = {};
 
-  /// [p]'s automatic maps (Subject and Sky) for previews and saves. They are
-  /// computed once, from the photo's upright preview, the first time its
-  /// settings need them ([needsAutoMaps]; [settings] stands for its settings
-  /// when given, such as the editor's while a slider moves), and freed with
-  /// the photo (removePhoto, clearPhotos, dispose). Calls at the same time
-  /// share one computation. Null when the settings do not need them, before the
-  /// preview is ready and when they could not be computed.
-  Future<AutoMapsSource?> autoMapsFor(PhotoItem p, [EditSettings? settings]) {
-    final have = _autoMaps[p.id];
-    if (have != null) return have.future;
+  /// [p]'s automatic maps (Subject and Sky) for previews and saves, as a
+  /// clone the caller owns and disposes once its render is done.
+  ///
+  /// The maps are computed once, from the photo's upright preview, the first
+  /// time its settings need them ([needsAutoMaps]; [settings] stands for its
+  /// settings when given, such as the editor's while a slider moves). The
+  /// cache keeps the original and frees it with the photo (removePhoto,
+  /// clearPhotos, dispose); clones handed out stay valid until their owners
+  /// dispose them. Calls at the same time share one computation. Null when
+  /// the settings do not need them, before the preview is ready, and when
+  /// they could not be computed (the next call tries again).
+  Future<AutoMaps?> autoMapsFor(PhotoItem p, [EditSettings? settings]) async {
+    final entry = _autoMaps[p.id] ?? _startAutoMaps(p, settings);
+    if (entry == null) return null;
+    final maps = await entry.future;
+    // Freed meanwhile (the photo went): nothing to hand out.
+    if (maps == null || entry.freed) return null;
+    return maps.clone();
+  }
+
+  /// Starts computing [p]'s maps when they are needed; null when not.
+  _MapsEntry? _startAutoMaps(PhotoItem p, EditSettings? settings) {
     final src = p.preview;
     if (_disposed ||
         src == null ||
         !photos.contains(p) ||
         !needsAutoMaps(settings ?? settingsFor(p))) {
-      return Future.value(null);
+      return null;
     }
     // Its own handle, so freeing the preview meanwhile is safe.
     final copy = src.clone();
@@ -754,14 +769,20 @@ class HomeController extends ChangeNotifier {
         return entry.maps = maps;
       } catch (e) {
         debugPrint('Could not find the subject and sky of ${p.name}: $e');
+        // Not kept: the next call tries again.
+        if (identical(_autoMaps[p.id], entry)) _autoMaps.remove(p.id);
         return null;
       } finally {
         copy.dispose();
       }
     }();
     _autoMaps[p.id] = entry;
-    return entry.future;
+    return entry;
   }
+
+  /// The cached original of [p]'s maps, for tests (never dispose it).
+  @visibleForTesting
+  AutoMaps? debugCachedAutoMaps(PhotoItem p) => _autoMaps[p.id]?.maps;
 
   Future<void> removePhoto(int id) async {
     final i = photos.indexWhere((p) => p.id == id);
@@ -1256,17 +1277,22 @@ class HomeController extends ChangeNotifier {
     if (s == null || s.isNeutral) {
       return exporter.render(bytes, item.doc, item.prep, exportSettings);
     }
-    // The cached maps, so the exporter does not compute them again.
+    // A clone of the cached maps, so the exporter does not compute them
+    // again; ours to free, so removing the photo meanwhile is safe.
     final auto = await autoMapsFor(p);
-    return exporter.render(
-      bytes,
-      item.doc,
-      item.prep,
-      exportSettings,
-      edit: s,
-      profile: profileFor(s),
-      auto: auto,
-    );
+    try {
+      return await exporter.render(
+        bytes,
+        item.doc,
+        item.prep,
+        exportSettings,
+        edit: s,
+        profile: profileFor(s),
+        auto: auto,
+      );
+    } finally {
+      auto?.dispose();
+    }
   }
 
   Future<void> saveAll() async {
