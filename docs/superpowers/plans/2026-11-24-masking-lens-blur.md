@@ -39,7 +39,7 @@ Port the ideas and maths, credit them in comments (the licence is already in the
   - analyze clean and per-area test runs; goldens opened and judged;
   - plain sentence-case wording with British "Colour";
   - about 1 GB of free RAM, so one heavy process at a time;
-  - format only the files you change; the single trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`;
+  - format only the files you change; the single Co-Authored-By trailer;
   - never push, tag or merge.
 - Branch: `feature/masking` (created from `main` at v1.1.0+3).
 - **The OpenGL ES rule (learned in 1.1.0):** every photo texture a shader samples is a *drawn* image, made with `toImage`, never a decoded or uploaded one. On GLES, reads of them flip `uv.y` under `#ifdef IMPELLER_TARGET_OPENGLES`. Colour tables made with `imageFromRgba` are uploaded and are not flipped. Mask coverage images are drawn with Canvas and `toImage`, so they are drawn images and their reads flip like the photo's. Add a guard test per new shader, like `test/core/develop/shader_gles_test.dart`.

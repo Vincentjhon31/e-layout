@@ -7,6 +7,12 @@ Write short, plain bullets that start with "- ", one idea each, for the people w
 Never mention internal details such as servers, hosting, keys, admin tools or file paths.
 -->
 
+## 1.2.0
+
+- Built-in looks: 16 ready presets such as Warm, Film, Vintage, Teal & orange and Black & white, with nothing to download.
+- Masks: change just part of a photo with a brush, a gradient, a brightness or colour range, or the subject, sky and background found for you.
+- Lens blur: keep the subject sharp and blur the rest, with soft bokeh highlights.
+
 ## 1.1.0
 
 - Edit your photos inside e-Layout: light, colour, curves, effects, sharpening and noise reduction.
