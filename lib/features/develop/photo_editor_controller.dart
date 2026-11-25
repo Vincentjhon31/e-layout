@@ -8,7 +8,7 @@ import '../../core/presets/preset.dart';
 import '../home/home_controller.dart';
 
 /// The photo editor's tools, in the order of the tool strip.
-enum ToolPanel { presets, light, colour, effects, detail, masks }
+enum ToolPanel { presets, light, colour, effects, detail, masks, blur }
 
 /// Undo keeps at most this many looks.
 const int kEditorHistory = 100;
@@ -39,6 +39,7 @@ class PhotoEditorController extends ChangeNotifier {
   String? _maskId;
   int _component = 0;
   bool _showOverlay = false;
+  bool _showFocus = false;
   double _brushSize = 0.05;
   double _brushFeather = 50;
   double _brushFlow = 100;
@@ -433,6 +434,35 @@ class PhotoEditorController extends ChangeNotifier {
   Future<void> setMaskValue(String id, Setting s, double v) =>
       _editMask(id, (m) => _withValue(m, s, v));
 
+  // ---------- lens blur ----------
+
+  /// This photo's lens blur, with the change being dragged.
+  LensBlur get lensBlur => settings.lensBlur;
+
+  /// True when the canvas shows the lens blur's in-focus area in green
+  /// (view state: it is not part of the look).
+  bool get showFocus => _showFocus;
+
+  void setShowFocus(bool on) {
+    if (on == _showFocus) return;
+    _showFocus = on;
+    _changed();
+  }
+
+  /// Shows [l] without keeping it yet (a slider drag; [endChange] keeps it
+  /// as one step).
+  void previewLens(LensBlur l) {
+    beginChange();
+    _draft = _look.withPhotoPatch(photo.id, SettingsPatch(lensBlur: l));
+    _changed();
+  }
+
+  /// Keeps [l] as the lens blur, as one step.
+  Future<void> setLens(LensBlur l) async {
+    if (!changing && settings.lensBlur == l) return;
+    await _patch(() => SettingsPatch(lensBlur: l));
+  }
+
   // ---------- history ----------
 
   Future<void> undo() async {
@@ -490,3 +520,25 @@ class PhotoEditorController extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// [l] with the given fields changed; [maskId] null keeps it, and
+/// [clearMask] removes it.
+LensBlur lensWith(
+  LensBlur l, {
+  double? amount,
+  LensFocus? focus,
+  double? fx,
+  double? fy,
+  String? maskId,
+  bool clearMask = false,
+  double? transition,
+  double? boost,
+}) => LensBlur(
+  amount: amount ?? l.amount,
+  focus: focus ?? l.focus,
+  fx: fx ?? l.fx,
+  fy: fy ?? l.fy,
+  maskId: clearMask ? null : (maskId ?? l.maskId),
+  transition: transition ?? l.transition,
+  boost: boost ?? l.boost,
+);

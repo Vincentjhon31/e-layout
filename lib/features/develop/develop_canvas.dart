@@ -243,9 +243,16 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     return _maskView(p, g, _scale(g));
   }
 
-  /// The selected mask's coverage is on screen in red.
+  /// The selected mask's coverage is on screen in red, or the lens blur's
+  /// in-focus map of a subject or mask in green.
   @visibleForTesting
   bool get showsMaskOverlay => _overlayShown() != null;
+
+  /// The lens blur's in-focus area is on screen in green (a subject or
+  /// mask map, or the soft disc of a point).
+  @visibleForTesting
+  bool get showsFocusOverlay =>
+      _lensShowsFocus && (_lensPoint || _overlayShown() != null);
 
   /// Zooms to [z] (1 is fitted) around the middle of the box.
   @visibleForTesting
@@ -358,6 +365,15 @@ class DevelopCanvasState extends State<DevelopCanvas> {
     final s = m.components[c.selectedComponent].shape;
     return editsOnPhoto(s) ? s : null;
   }
+
+  /// The Lens blur panel is open on the photo with the edits showing.
+  bool get _lensOn => c.panel == ToolPanel.blur && !c.comparing;
+
+  /// A tap on the photo moves the focus point.
+  bool get _lensPoint => _lensOn && c.lensBlur.focus == LensFocus.point;
+
+  /// "Show focus" is on in the Lens blur panel.
+  bool get _lensShowsFocus => _lensOn && c.showFocus;
 
   // ---------- gestures ----------
 
@@ -480,6 +496,14 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   }
 
   void _tapUp(TapUpDetails d) {
+    if (_lensPoint) {
+      // The tap, through the view, so zoom and pan do not matter; taps off
+      // the photo are ignored.
+      final (x, y) = maskView.toNorm(d.localPosition);
+      if (x < 0 || x > 1 || y < 0 || y > 1) return;
+      c.setLens(lensWith(c.lensBlur, fx: x, fy: y));
+      return;
+    }
     if (_maskTarget == null) return;
     tapMask(c, maskView, d.localPosition, sample: _sampleAt, toast: _toast);
   }
@@ -512,11 +536,31 @@ class DevelopCanvasState extends State<DevelopCanvas> {
   /// The selected mask, when its coverage should be on screen: "Show mask"
   /// is on, or a handle or the brush is being dragged.
   Mask? get _overlayMask {
+    if (_lensShowsFocus) return _lensFocusMask;
     if (c.panel != ToolPanel.masks || c.comparing) return null;
     final m = c.selectedMask;
     if (m == null || m.components.isEmpty) return null;
     final dragging = _maskDrag?.live ?? false;
     return c.showOverlay || dragging ? m : null;
+  }
+
+  /// The mask whose coverage is the lens blur's in-focus area: the chosen
+  /// mask, or the subject (also for a mask that is gone, as the render
+  /// does). A point has no mask: its disc is drawn without an image.
+  Mask? get _lensFocusMask {
+    final l = c.lensBlur;
+    if (l.focus == LensFocus.point) return null;
+    if (l.focus == LensFocus.mask) {
+      for (final m in c.masks) {
+        if (m.id == l.maskId && m.components.isNotEmpty) {
+          return Mask(id: m.id, components: m.components);
+        }
+      }
+    }
+    return Mask(
+      id: 'lens subject',
+      components: [MaskComponent(const SubjectShape())],
+    );
   }
 
   /// The overlay image when it belongs on screen now.
@@ -1050,7 +1094,9 @@ class DevelopCanvasState extends State<DevelopCanvas> {
         final overlay = _overlayShown();
         final drag = _maskDrag;
         final painting = drag != null && drag.live && drag.painting;
-        final tappable = target is ColourRangeShape;
+        final lens = _lensOn;
+        final lensPoint = _lensPoint;
+        final tappable = target is ColourRangeShape || lensPoint;
         return Listener(
           onPointerSignal: _scroll,
           onPointerDown: _pointerDown,
@@ -1098,7 +1144,8 @@ class DevelopCanvasState extends State<DevelopCanvas> {
                             ),
                     ),
                   ),
-                  if (img != null && (target != null || overlay != null))
+                  if (img != null &&
+                      (target != null || overlay != null || lensPoint))
                     Positioned.fill(
                       child: IgnorePointer(
                         child: CustomPaint(
@@ -1109,6 +1156,11 @@ class DevelopCanvasState extends State<DevelopCanvas> {
                                 ? target
                                 : null,
                             overlay: overlay,
+                            overlayColour: lens
+                                ? kFocusOverlayColour
+                                : kMaskOverlayColour,
+                            focusPoint: lensPoint ? c.lensBlur : null,
+                            showFocusDisc: lensPoint && c.showFocus,
                             active: drag?.handle,
                             brushAt: painting ? drag.at : null,
                             brushSize: c.brushSize,

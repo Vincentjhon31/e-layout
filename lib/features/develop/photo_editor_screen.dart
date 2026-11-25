@@ -14,6 +14,7 @@ import 'panels/panel_colour.dart';
 import 'panels/panel_detail.dart';
 import 'panels/panel_effects.dart';
 import 'panels/panel_light.dart';
+import 'panels/panel_blur.dart';
 import 'panels/panel_masks.dart';
 import 'panels/panel_presets.dart';
 import 'photo_editor_controller.dart';
@@ -35,6 +36,7 @@ String toolTitle(ToolPanel p) => switch (p) {
   ToolPanel.effects => 'Effects',
   ToolPanel.detail => 'Detail',
   ToolPanel.masks => 'Masking',
+  ToolPanel.blur => 'Lens blur',
 };
 
 IconData toolIcon(ToolPanel p) => switch (p) {
@@ -44,6 +46,7 @@ IconData toolIcon(ToolPanel p) => switch (p) {
   ToolPanel.effects => CupertinoIcons.sparkles,
   ToolPanel.detail => CupertinoIcons.triangle,
   ToolPanel.masks => CupertinoIcons.circle_lefthalf_fill,
+  ToolPanel.blur => CupertinoIcons.camera_viewfinder,
 };
 
 /// The controls of [panel]. On phones [onDone] closes the panel; the
@@ -67,6 +70,8 @@ Widget toolPanelBody(
       return DevelopPanelShell(child: DetailPanel(controller: c));
     case ToolPanel.masks:
       return MasksPanel(controller: c, onDone: onDone);
+    case ToolPanel.blur:
+      return DevelopPanelShell(child: BlurPanel(controller: c));
   }
 }
 
@@ -476,18 +481,20 @@ class _ToolStrip extends StatelessWidget {
         top: false,
         child: SizedBox(
           height: 72,
-          // Every tool fits on a 320 pt phone: tiles narrow to 48 at most.
+          // Every tool fits on a 320 pt phone: tiles narrow to 44 at most.
           child: LayoutBuilder(
             builder: (context, box) {
-              final tile = ((box.maxWidth - 24) / ToolPanel.values.length)
-                  .clamp(48.0, 64.0);
+              final tile = ((box.maxWidth - 8) / ToolPanel.values.length).clamp(
+                44.0,
+                64.0,
+              );
               return Center(
                 child: ListView(
                   key: const ValueKey('tool-strip'),
                   scrollDirection: Axis.horizontal,
                   shrinkWrap: true,
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
+                    horizontal: 4,
                     vertical: 4,
                   ),
                   children: [
@@ -609,7 +616,7 @@ class _SidePanel extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Six tools are too many words for a segmented control this
+            // Seven tools are too many words for a segmented control this
             // narrow, so they are the phone's tiles, the open one tinted.
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),

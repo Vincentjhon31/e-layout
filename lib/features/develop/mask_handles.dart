@@ -18,6 +18,9 @@ const double kStrokeSpacing = 0.002;
 /// The selected mask's area on the photo: red at 50 %.
 const Color kMaskOverlayColour = Color(0x80FF3B30);
 
+/// The lens blur's in-focus area on the photo: green at 40 %.
+const Color kFocusOverlayColour = Color(0x6634C759);
+
 const String kStrokesFullMessage =
     'This mask has the most strokes it can hold.';
 const String kColoursFullMessage = 'A colour range holds at most 5 colours.';
@@ -470,9 +473,20 @@ class MaskHandlesPainter extends CustomPainter {
     required this.brushSize,
     required this.brushFeather,
     required this.accent,
+    this.overlayColour = kMaskOverlayColour,
+    this.focusPoint,
+    this.showFocusDisc = false,
   });
 
   final MaskView view;
+
+  /// What the [overlay] is tinted with: red for a mask, green for focus.
+  final Color overlayColour;
+
+  /// The lens blur whose focus ring is drawn (Point focus), and whether its
+  /// in-focus disc is drawn too (Show focus).
+  final LensBlur? focusPoint;
+  final bool showFocusDisc;
 
   /// The shape whose handles show (null for none).
   final MaskShape? shape;
@@ -511,15 +525,15 @@ class MaskHandlesPainter extends CustomPainter {
         v.photoRect,
         Paint()
           ..filterQuality = FilterQuality.medium
-          ..colorFilter = const ColorFilter.mode(
-            kMaskOverlayColour,
-            BlendMode.srcIn,
-          ),
+          ..colorFilter = ColorFilter.mode(overlayColour, BlendMode.srcIn),
       );
     }
+    final fp = focusPoint;
+    if (fp != null && showFocusDisc) _focusDisc(canvas, fp);
     final s = shape;
     if (s is RadialShape) _radial(canvas, s);
     if (s is LinearShape) _linear(canvas, s);
+    if (fp != null) _focusRing(canvas, fp);
     final b = brushAt;
     if (b != null) {
       final r = brushSize * view.unitLong;
@@ -528,6 +542,52 @@ class MaskHandlesPainter extends CustomPainter {
       if (inner > 2 && inner < r - 2) _ring(canvas, b, inner, 1, faint: true);
     }
     canvas.restore();
+  }
+
+  /// The in-focus disc of a Point focus, with the weighting the lens pass
+  /// uses: full inside `0.08 + 0.3 x (1 - Transition/100)` of the long edge,
+  /// then a smoothstep down to nothing over a further
+  /// `0.05 + 0.4 x Transition/100` of it.
+  void _focusDisc(Canvas canvas, LensBlur l) {
+    final v = view;
+    final long = math.max(v.photo.width, v.photo.height);
+    final t = l.transition / 100;
+    final inner = (0.08 + 0.3 * (1 - t)) * long * v.scale;
+    final outer = inner + (0.05 + 0.4 * t) * long * v.scale;
+    if (outer <= 0) return;
+    const steps = 8;
+    final base = overlayColour;
+    final colors = <Color>[base];
+    final stops = <double>[0];
+    for (var k = 0; k <= steps; k++) {
+      final x = k / steps;
+      final a = 1 - x * x * (3 - 2 * x);
+      colors.add(base.withValues(alpha: base.a * a));
+      stops.add((inner + (outer - inner) * x) / outer);
+    }
+    canvas.save();
+    canvas.clipRect(v.photoRect);
+    canvas.drawRect(
+      v.photoRect,
+      Paint()
+        ..shader = ui.Gradient.radial(
+          v.toScreen(l.fx, l.fy),
+          outer,
+          colors,
+          stops,
+        ),
+    );
+    canvas.restore();
+  }
+
+  /// The focus point: a white ring with a soft shadow, kept below the band
+  /// at the top of the canvas like the handles.
+  void _focusRing(Canvas canvas, LensBlur l) {
+    var c = view.toScreen(l.fx, l.fy);
+    final lowest = view.reach.top + kHandleHitRadius;
+    if (c.dy < lowest) c = Offset(c.dx, lowest);
+    _ring(canvas, c, 14, 2);
+    _dot(canvas, c, MaskHandle.centre, r: 3);
   }
 
   /// A white line with a soft dark edge, so it reads on any photo.
@@ -685,5 +745,8 @@ class MaskHandlesPainter extends CustomPainter {
       old.brushAt != brushAt ||
       old.brushSize != brushSize ||
       old.brushFeather != brushFeather ||
-      old.accent != accent;
+      old.accent != accent ||
+      old.overlayColour != overlayColour ||
+      old.focusPoint != focusPoint ||
+      old.showFocusDisc != showFocusDisc;
 }

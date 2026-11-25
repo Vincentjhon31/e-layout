@@ -86,7 +86,7 @@ void main() {
 
   group('tool strip', () {
     test('Masking comes after Detail', () {
-      expect(ToolPanel.values.last, ToolPanel.masks);
+      expect(ToolPanel.values[ToolPanel.values.length - 2], ToolPanel.masks);
       expect(ToolPanel.values.indexOf(ToolPanel.masks), 5);
     });
 

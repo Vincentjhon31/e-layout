@@ -10,6 +10,7 @@ class Segmented<T extends Object> extends StatelessWidget {
     required this.value,
     required this.onChanged,
     this.compact = false,
+    this.disabled = const {},
   });
 
   /// Value to label, in display order.
@@ -19,6 +20,9 @@ class Segmented<T extends Object> extends StatelessWidget {
 
   /// Smaller type, for the control floating over the editor canvas.
   final bool compact;
+
+  /// Segments that look dimmed and ignore taps.
+  final Set<T> disabled;
 
   @override
   Widget build(BuildContext context) {
@@ -30,16 +34,19 @@ class Segmented<T extends Object> extends StatelessWidget {
       thumbColor: AppColors.brightnessOf(context) == Brightness.dark ? const Color(0xFF636366) : c.card,
       padding: const EdgeInsets.all(2),
       onValueChanged: (v) {
-        if (v != null) onChanged(v);
+        if (v != null && !disabled.contains(v)) onChanged(v);
       },
       children: {
         for (final e in segments.entries)
           e.key: Padding(
             padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 10, vertical: compact ? 4 : 7),
-            child: Text(e.value,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: e.key == value ? style.copyWith(fontWeight: FontWeight.w600) : style),
+            child: Opacity(
+              opacity: disabled.contains(e.key) ? 0.4 : 1,
+              child: Text(e.value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: e.key == value ? style.copyWith(fontWeight: FontWeight.w600) : style),
+            ),
           ),
       },
     );
