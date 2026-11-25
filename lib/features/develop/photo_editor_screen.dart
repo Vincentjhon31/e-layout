@@ -46,12 +46,14 @@ IconData toolIcon(ToolPanel p) => switch (p) {
   ToolPanel.masks => CupertinoIcons.circle_lefthalf_fill,
 };
 
-/// The controls of [panel].
+/// The controls of [panel]. On phones [onDone] closes the panel; the
+/// Masking panel then draws its own title row (it holds the mask's name).
 Widget toolPanelBody(
   BuildContext context,
   PhotoEditorController c,
-  ToolPanel panel,
-) {
+  ToolPanel panel, {
+  VoidCallback? onDone,
+}) {
   switch (panel) {
     case ToolPanel.presets:
       return PresetsPanel(controller: c);
@@ -64,7 +66,7 @@ Widget toolPanelBody(
     case ToolPanel.detail:
       return DevelopPanelShell(child: DetailPanel(controller: c));
     case ToolPanel.masks:
-      return MasksPanel(controller: c);
+      return MasksPanel(controller: c, onDone: onDone);
   }
 }
 
@@ -334,13 +336,82 @@ class _PhotoArea extends StatelessWidget {
           right: 8,
           child: SelectBuilder(
             listenable: c,
-            select: () => (c.home.current != null, c.showLayout),
-            builder: (context) => c.home.current == null
-                ? const SizedBox.shrink()
-                : _LayoutToggle(on: c.showLayout, onPressed: c.toggleLayout),
+            select: () => (
+              c.home.current != null,
+              c.showLayout,
+              c.panel == ToolPanel.masks && c.selectedMaskId != null,
+              c.showOverlay,
+            ),
+            builder: (context) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (c.panel == ToolPanel.masks && c.selectedMaskId != null)
+                  _OverlayToggle(
+                    on: c.showOverlay,
+                    onPressed: () => c.setShowOverlay(!c.showOverlay),
+                  ),
+                if (c.home.current != null) ...[
+                  const SizedBox(width: 8),
+                  _LayoutToggle(on: c.showLayout, onPressed: c.toggleLayout),
+                ],
+              ],
+            ),
           ),
         ),
       ],
+    );
+  }
+}
+
+/// "Show mask": the selected mask's area in red on the photo. The pill is
+/// accent-filled while on, so on and off read apart at a glance.
+class _OverlayToggle extends StatelessWidget {
+  const _OverlayToggle({required this.on, required this.onPressed});
+  final bool on;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final fg = on ? colors.onAccent : const Color(0xFFFFFFFF);
+    return Semantics(
+      toggled: on,
+      child: Pressable(
+        key: const ValueKey('show-mask'),
+        onPressed: onPressed,
+        semanticLabel: 'Show mask',
+        child: SizedBox(
+          height: AppMetrics.minTouch,
+          child: Center(
+            widthFactor: 1,
+            child: Container(
+              height: 32,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: on ? colors.accent : overlayPill(context),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    on
+                        ? CupertinoIcons.circle_lefthalf_fill
+                        : CupertinoIcons.circle,
+                    size: 16,
+                    color: fg,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'Show mask',
+                    style: AppText.captionStrong.copyWith(color: fg),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -464,41 +535,49 @@ class _PanelArea extends StatelessWidget {
         top: false,
         child: Column(
           children: [
-            SizedBox(
-              height: 48,
-              child: Row(
-                children: [
-                  const SizedBox(width: 88),
-                  Expanded(
-                    child: Text(
-                      toolTitle(panel),
-                      textAlign: TextAlign.center,
-                      style: AppText.headline.copyWith(color: colors.text),
+            if (panel != ToolPanel.masks)
+              SizedBox(
+                height: 48,
+                child: Row(
+                  children: [
+                    const SizedBox(width: 88),
+                    Expanded(
+                      child: Text(
+                        toolTitle(panel),
+                        textAlign: TextAlign.center,
+                        style: AppText.headline.copyWith(color: colors.text),
+                      ),
                     ),
-                  ),
-                  SizedBox(
-                    width: 88,
-                    child: Pressable(
-                      onPressed: onDone,
-                      semanticLabel: 'Done',
-                      child: Container(
-                        height: 44,
-                        padding: const EdgeInsets.only(right: 16),
-                        alignment: Alignment.centerRight,
-                        child: Text(
-                          'Done',
-                          style: AppText.button.copyWith(color: colors.accent),
+                    SizedBox(
+                      width: 88,
+                      child: Pressable(
+                        onPressed: onDone,
+                        semanticLabel: 'Done',
+                        child: Container(
+                          height: 44,
+                          padding: const EdgeInsets.only(right: 16),
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            'Done',
+                            style: AppText.button.copyWith(
+                              color: colors.accent,
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: toolPanelBody(context, controller, panel),
+                child: toolPanelBody(
+                  context,
+                  controller,
+                  panel,
+                  onDone: onDone,
+                ),
               ),
             ),
           ],

@@ -247,23 +247,41 @@ Future<bool> showConfirm(BuildContext context,
 
 /// Asks for a line of text. Null when cancelled.
 Future<String?> showTextPrompt(BuildContext context,
-    {required String title, String? message, String initial = '', required String confirmLabel, String? placeholder}) {
+    {required String title,
+    String? message,
+    String initial = '',
+    required String confirmLabel,
+    String? placeholder,
+    int? maxLength}) {
   return showCupertinoDialog<String>(
     context: context,
     barrierDismissible: true,
     builder: (_) => _TextPrompt(
-        title: title, message: message, initial: initial, confirmLabel: confirmLabel, placeholder: placeholder),
+        title: title,
+        message: message,
+        initial: initial,
+        confirmLabel: confirmLabel,
+        placeholder: placeholder,
+        maxLength: maxLength),
   );
 }
 
 class _TextPrompt extends StatefulWidget {
   const _TextPrompt(
-      {required this.title, this.message, required this.initial, required this.confirmLabel, this.placeholder});
+      {required this.title,
+      this.message,
+      required this.initial,
+      required this.confirmLabel,
+      this.placeholder,
+      this.maxLength});
   final String title;
   final String? message;
   final String initial;
   final String confirmLabel;
   final String? placeholder;
+
+  /// Longest text the field takes, or null for no limit.
+  final int? maxLength;
 
   @override
   State<_TextPrompt> createState() => _TextPromptState();
@@ -293,6 +311,7 @@ class _TextPromptState extends State<_TextPrompt> {
         controller: _text,
         autofocus: true,
         placeholder: widget.placeholder,
+        maxLength: widget.maxLength,
         clearButtonMode: OverlayVisibilityMode.editing,
         textCapitalization: TextCapitalization.sentences,
         onSubmitted: (_) => _done(),

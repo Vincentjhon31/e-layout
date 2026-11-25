@@ -13,6 +13,9 @@ enum ToolPanel { presets, light, colour, effects, detail, masks }
 /// Undo keeps at most this many looks.
 const int kEditorHistory = 100;
 
+/// A mask's name is at most this long.
+const int kMaxMaskName = 40;
+
 /// The photo editor: which photo is open, the change being dragged, and the
 /// undo history. Every change goes to [HomeController.setLook], so Home's
 /// grid and the saved photos follow at once.
@@ -34,6 +37,7 @@ class PhotoEditorController extends ChangeNotifier {
   bool _comparing = false;
   bool _showLayout = true;
   String? _maskId;
+  int _component = 0;
   bool _showOverlay = false;
   double _brushSize = 0.05;
   double _brushFeather = 50;
@@ -189,6 +193,19 @@ class PhotoEditorController extends ChangeNotifier {
 
   Mask? get selectedMask => _maskId == null ? null : _find(masks, _maskId!);
 
+  /// The component of the selected mask that the Mask tab (and the
+  /// canvas's handles) work on.
+  int get selectedComponent {
+    final n = selectedMask?.components.length ?? 0;
+    return n == 0 ? 0 : _component.clamp(0, n - 1);
+  }
+
+  void selectComponent(int i) {
+    if (i == _component) return;
+    _component = i;
+    _changed();
+  }
+
   /// True when the canvas shows the selected mask's area in red.
   bool get showOverlay => _showOverlay;
 
@@ -202,6 +219,7 @@ class PhotoEditorController extends ChangeNotifier {
   void selectMask(String? id) {
     if (id == _maskId) return;
     _maskId = id;
+    _component = 0;
     _changed();
   }
 
@@ -307,6 +325,7 @@ class PhotoEditorController extends ChangeNotifier {
       components: [MaskComponent(first)],
     );
     _maskId = m.id;
+    _component = 0;
     await _commit(() => _withMasks(home.look, (l) => [...l, m]));
   }
 
@@ -318,20 +337,24 @@ class PhotoEditorController extends ChangeNotifier {
     );
   }
 
-  /// Renames mask [id]; a blank name keeps the old one.
+  /// Renames mask [id] (at most [kMaxMaskName] characters); a blank name
+  /// keeps the old one.
   Future<void> renameMask(String id, String name) async {
-    final n = name.trim();
+    var n = name.trim();
     if (n.isEmpty) return;
+    if (n.length > kMaxMaskName) n = n.substring(0, kMaxMaskName).trimRight();
     await _editMask(id, (m) => _copy(m, name: n));
   }
 
   Future<void> setMaskVisible(String id, bool visible) =>
       _editMask(id, (m) => _copy(m, visible: visible));
 
-  /// Combines [shape] into mask [id] with [op]; at most [kMaxComponents].
+  /// Combines [shape] into mask [id] with [op] and selects it; at most
+  /// [kMaxComponents].
   Future<void> addComponent(String id, MaskShape shape, MaskOp op) async {
     final m = _find(masks, id);
     if (m == null || m.components.length >= kMaxComponents) return;
+    if (id == _maskId) _component = m.components.length;
     await _editMask(
       id,
       (m) => _copy(
@@ -371,6 +394,7 @@ class PhotoEditorController extends ChangeNotifier {
     final m = _find(masks, id);
     if (m == null || m.components.length < 2) return;
     if (index < 0 || index >= m.components.length) return;
+    if (id == _maskId && _component >= index && _component > 0) _component--;
     await _editMask(
       id,
       (m) => _copy(m, components: [...m.components]..removeAt(index)),
@@ -426,6 +450,7 @@ class PhotoEditorController extends ChangeNotifier {
     _openId = list[index].id;
     _comparing = false;
     _maskId = null;
+    _component = 0;
     developer.clearCache();
     _changed();
   }

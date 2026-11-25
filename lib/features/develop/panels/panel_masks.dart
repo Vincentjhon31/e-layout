@@ -6,6 +6,7 @@ import '../../../ui/app_theme.dart';
 import '../../../ui/widgets/action_sheet.dart';
 import '../../../ui/widgets/app_button.dart';
 import '../../../ui/widgets/pressable.dart';
+import '../../../ui/widgets/segmented.dart';
 import '../../editor/panels/panel_widgets.dart';
 import '../photo_editor_controller.dart';
 import 'develop_slider.dart';
@@ -91,9 +92,14 @@ Future<void> showMaskKinds(
 
 /// Masking: the photo's masks, and the selected mask's adjustments and
 /// shapes.
+///
+/// On phones ([onDone] set) the panel draws its own title row, so the
+/// selected mask's name, the way back to the list and its menu sit where
+/// the other tools have their title, and the controls keep their room.
 class MasksPanel extends StatelessWidget {
-  const MasksPanel({super.key, required this.controller});
+  const MasksPanel({super.key, required this.controller, this.onDone});
   final PhotoEditorController controller;
+  final VoidCallback? onDone;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -101,27 +107,146 @@ class MasksPanel extends StatelessWidget {
     builder: (context, _) {
       final c = controller;
       final m = c.selectedMask;
-      if (m == null) {
-        return DevelopPanelShell(child: _MaskList(controller: c));
-      }
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _MaskHeader(controller: c, mask: m),
+          if (onDone != null || m != null)
+            _TitleRow(controller: c, mask: m, onDone: onDone),
           Expanded(
             child: DevelopPanelShell(
-              child: PanelTabs(
-                tabs: {
-                  'Adjust': () => _AdjustTab(controller: c, mask: m),
-                  'Mask': () => _ShapesTab(controller: c, mask: m),
-                },
-              ),
+              child: m == null
+                  ? _MaskList(controller: c)
+                  : _MaskTabs(controller: c, mask: m),
             ),
           ),
         ],
       );
     },
   );
+}
+
+// ---------- the title row ----------
+
+class _TitleRow extends StatelessWidget {
+  const _TitleRow({required this.controller, this.mask, this.onDone});
+  final PhotoEditorController controller;
+  final Mask? mask;
+  final VoidCallback? onDone;
+
+  void _menu(BuildContext context, Mask mask) {
+    final c = controller;
+    final id = mask.id;
+    showActionSheet(
+      context,
+      title: mask.name,
+      actions: [
+        SheetAction('Rename', () async {
+          final name = await showTextPrompt(
+            context,
+            title: 'Rename mask',
+            initial: mask.name,
+            confirmLabel: 'Rename',
+            maxLength: kMaxMaskName,
+          );
+          if (name != null) await c.renameMask(id, name);
+        }),
+        SheetAction('Delete mask', () => c.deleteMask(id), destructive: true),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    final m = mask;
+    final done = onDone;
+    return SizedBox(
+      height: 48,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 88,
+            child: m == null
+                ? null
+                : Align(
+                    alignment: Alignment.centerLeft,
+                    child: Pressable(
+                      key: const ValueKey('mask-back'),
+                      onPressed: () => controller.selectMask(null),
+                      semanticLabel: 'All masks',
+                      child: SizedBox(
+                        height: 44,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              CupertinoIcons.chevron_left,
+                              size: 20,
+                              color: colors.accent,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              'Masks',
+                              style: AppText.button.copyWith(
+                                color: colors.accent,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+          ),
+          Expanded(
+            child: Text(
+              m?.name ?? 'Masking',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: AppText.headline.copyWith(color: colors.text),
+            ),
+          ),
+          SizedBox(
+            width: 88,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (m != null)
+                  Pressable(
+                    key: const ValueKey('mask-menu'),
+                    onPressed: () => _menu(context, m),
+                    semanticLabel: 'Mask options',
+                    child: SizedBox(
+                      width: 40,
+                      height: 44,
+                      child: Icon(
+                        CupertinoIcons.ellipsis_circle,
+                        size: 24,
+                        color: colors.accent,
+                      ),
+                    ),
+                  ),
+                if (done != null)
+                  Pressable(
+                    onPressed: done,
+                    semanticLabel: 'Done',
+                    child: Container(
+                      height: 44,
+                      constraints: const BoxConstraints(minWidth: 44),
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        'Done',
+                        style: AppText.button.copyWith(color: colors.accent),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ---------- the list ----------
@@ -263,118 +388,9 @@ class _MaskRow extends StatelessWidget {
 
 // ---------- one mask ----------
 
-class _MaskHeader extends StatelessWidget {
-  const _MaskHeader({required this.controller, required this.mask});
-  final PhotoEditorController controller;
-  final Mask mask;
-
-  void _menu(BuildContext context) {
-    final c = controller;
-    final id = mask.id;
-    showActionSheet(
-      context,
-      title: mask.name,
-      actions: [
-        SheetAction('Rename', () async {
-          final name = await showTextPrompt(
-            context,
-            title: 'Rename mask',
-            initial: mask.name,
-            confirmLabel: 'Rename',
-          );
-          if (name != null) await c.renameMask(id, name);
-        }),
-        SheetAction('Delete mask', () => c.deleteMask(id), destructive: true),
-      ],
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
-    final c = controller;
-    return SizedBox(
-      height: 44,
-      child: Row(
-        children: [
-          Pressable(
-            key: const ValueKey('mask-back'),
-            onPressed: () => c.selectMask(null),
-            semanticLabel: 'All masks',
-            child: SizedBox(
-              width: 32,
-              height: 44,
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Icon(
-                  CupertinoIcons.chevron_left,
-                  size: 22,
-                  color: colors.accent,
-                ),
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              mask.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppText.headline.copyWith(color: colors.text),
-            ),
-          ),
-          const SizedBox(width: 8),
-          SizedBox(
-            height: 44,
-            child: Center(
-              child: PanelChip(
-                label: 'Show mask',
-                on: c.showOverlay,
-                onTap: () => c.setShowOverlay(!c.showOverlay),
-              ),
-            ),
-          ),
-          Pressable(
-            key: const ValueKey('mask-menu'),
-            onPressed: () => _menu(context),
-            semanticLabel: 'Mask options',
-            child: SizedBox(
-              width: 40,
-              height: 44,
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: Icon(
-                  CupertinoIcons.ellipsis_circle,
-                  size: 24,
-                  color: colors.accent,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-const List<(Setting, String)> _localSliders = [
-  (Setting.exposure, 'Exposure'),
-  (Setting.contrast, 'Contrast'),
-  (Setting.highlights, 'Highlights'),
-  (Setting.shadows, 'Shadows'),
-  (Setting.whites, 'Whites'),
-  (Setting.blacks, 'Blacks'),
-  (Setting.temperature, 'Temperature'),
-  (Setting.tint, 'Tint'),
-  (Setting.vibrance, 'Vibrance'),
-  (Setting.saturation, 'Saturation'),
-  (Setting.texture, 'Texture'),
-  (Setting.clarity, 'Clarity'),
-  (Setting.dehaze, 'Dehaze'),
-];
-
-/// The 13 local settings, two to a row.
-class _AdjustTab extends StatelessWidget {
-  const _AdjustTab({required this.controller, required this.mask});
+/// Three slider rows at most per tab, so every tab fits a 320 pt phone.
+class _MaskTabs extends StatelessWidget {
+  const _MaskTabs({required this.controller, required this.mask});
   final PhotoEditorController controller;
   final Mask mask;
 
@@ -396,21 +412,63 @@ class _AdjustTab extends StatelessWidget {
     );
   }
 
+  /// Two sliders to a row; an odd last one takes the whole row.
+  Widget _page(List<Setting> list) => SliderPage(
+    children: [
+      for (var i = 0; i < list.length; i += 2)
+        if (i + 1 < list.length)
+          SliderPair(
+            left: _slider(list[i], _localLabels[list[i]]!),
+            right: _slider(list[i + 1], _localLabels[list[i + 1]]!),
+          )
+        else
+          _slider(list[i], _localLabels[list[i]]!),
+    ],
+  );
+
   @override
-  Widget build(BuildContext context) {
-    final rows = <Widget>[];
-    for (var i = 0; i < _localSliders.length; i += 2) {
-      final (s, l) = _localSliders[i];
-      if (i + 1 < _localSliders.length) {
-        final (s2, l2) = _localSliders[i + 1];
-        rows.add(SliderPair(left: _slider(s, l), right: _slider(s2, l2)));
-      } else {
-        rows.add(_slider(s, l));
-      }
-    }
-    return SliderPage(children: rows);
-  }
+  Widget build(BuildContext context) => PanelTabs(
+    tabs: {
+      for (final t in kAdjustTabs.entries) t.key: () => _page(t.value),
+      'Mask': () => _ShapeTab(controller: controller, mask: mask),
+    },
+  );
 }
+
+/// The mask's adjustment tabs and their settings, in order.
+const Map<String, List<Setting>> kAdjustTabs = {
+  'Light': [
+    Setting.exposure,
+    Setting.contrast,
+    Setting.highlights,
+    Setting.shadows,
+    Setting.whites,
+    Setting.blacks,
+  ],
+  'Colour': [
+    Setting.temperature,
+    Setting.tint,
+    Setting.vibrance,
+    Setting.saturation,
+  ],
+  'Effects': [Setting.texture, Setting.clarity, Setting.dehaze],
+};
+
+const Map<Setting, String> _localLabels = {
+  Setting.exposure: 'Exposure',
+  Setting.contrast: 'Contrast',
+  Setting.highlights: 'Highlights',
+  Setting.shadows: 'Shadows',
+  Setting.whites: 'Whites',
+  Setting.blacks: 'Blacks',
+  Setting.temperature: 'Temperature',
+  Setting.tint: 'Tint',
+  Setting.vibrance: 'Vibrance',
+  Setting.saturation: 'Saturation',
+  Setting.texture: 'Texture',
+  Setting.clarity: 'Clarity',
+  Setting.dehaze: 'Dehaze',
+};
 
 String _opName(MaskOp op) => switch (op) {
   MaskOp.add => 'Added',
@@ -418,9 +476,55 @@ String _opName(MaskOp op) => switch (op) {
   MaskOp.intersect => 'Overlap only',
 };
 
-/// Each shape's controls, then Add and Subtract to combine more shapes.
-class _ShapesTab extends StatelessWidget {
-  const _ShapesTab({required this.controller, required this.mask});
+/// A small pill for picking one shape of the mask.
+class _ShapeChip extends StatelessWidget {
+  const _ShapeChip({
+    super.key,
+    required this.label,
+    required this.on,
+    required this.onTap,
+  });
+  final String label;
+  final bool on;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = AppColors.of(context);
+    return Semantics(
+      selected: on,
+      child: Pressable(
+        onPressed: onTap,
+        semanticLabel: label,
+        child: Container(
+          height: 36,
+          padding: const EdgeInsets.symmetric(horizontal: 9),
+          decoration: BoxDecoration(
+            color: on ? colors.accent : colors.raised,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          // widthFactor keeps the pill as wide as its words.
+          child: Center(
+            widthFactor: 1,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.captionStrong.copyWith(
+                color: on ? colors.onAccent : colors.text,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One shape at a time: chips pick it when there are several; its title row
+/// holds Add, Subtract and Remove, and its controls take one row.
+class _ShapeTab extends StatelessWidget {
+  const _ShapeTab({required this.controller, required this.mask});
   final PhotoEditorController controller;
   final Mask mask;
 
@@ -431,48 +535,102 @@ class _ShapesTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = controller;
+    final colors = AppColors.of(context);
     final comps = mask.components;
+    if (comps.isEmpty) return const SizedBox.shrink();
+    final i = c.selectedComponent;
+    final comp = comps[i];
     final full = comps.length >= kMaxComponents;
+    final title = comp.shape is BrushShape
+        ? Align(
+            alignment: Alignment.centerLeft,
+            child: Segmented<bool>(
+              compact: true,
+              segments: const {false: 'Brush', true: 'Erase'},
+              value: c.brushErase,
+              onChanged: (v) => c.setBrush(erase: v),
+            ),
+          )
+        : Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                maskShapeName(comp.shape),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppText.headline.copyWith(
+                  color: colors.text,
+                  fontSize: 15,
+                ),
+              ),
+              if (i > 0)
+                Text(
+                  _opName(comp.op),
+                  style: AppText.caption.copyWith(color: colors.secondary),
+                ),
+            ],
+          );
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (var i = 0; i < comps.length; i++) ...[
-          if (i > 0) const SizedBox(height: 4),
-          _ComponentHeader(
-            controller: controller,
-            mask: mask,
-            index: i,
-            removable: comps.length > 1,
+        if (comps.length > 1) ...[
+          Row(
+            children: [
+              for (var k = 0; k < comps.length; k++) ...[
+                if (k > 0) const SizedBox(width: 4),
+                Flexible(
+                  child: _ShapeChip(
+                    key: ValueKey('mask-shape-$k'),
+                    label: 'Shape ${k + 1}',
+                    on: k == i,
+                    onTap: () => c.selectComponent(k),
+                  ),
+                ),
+              ],
+            ],
           ),
-          ..._controls(context, i, comps[i].shape),
+          const SizedBox(height: 4),
         ],
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: PanelButton(
+        SizedBox(
+          height: 44,
+          child: Row(
+            children: [
+              Semantics(
+                label: i > 0 ? _opName(comp.op) : null,
+                child: _Badge(comp.shape, size: 24),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: title),
+              AppIconButton(
                 key: const ValueKey('mask-op-add'),
-                label: 'Add',
-                icon: CupertinoIcons.plus,
-                onTap: full ? null : () => _combine(context, MaskOp.add),
+                icon: CupertinoIcons.plus_circle,
+                label: 'Add a shape',
+                onPressed: full ? null : () => _combine(context, MaskOp.add),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: PanelButton(
+              AppIconButton(
                 key: const ValueKey('mask-op-subtract'),
-                label: 'Subtract',
-                icon: CupertinoIcons.minus,
-                onTap: full ? null : () => _combine(context, MaskOp.subtract),
+                icon: CupertinoIcons.minus_circle,
+                label: 'Subtract a shape',
+                onPressed: full
+                    ? null
+                    : () => _combine(context, MaskOp.subtract),
               ),
-            ),
-          ],
+              if (comps.length > 1)
+                AppIconButton(
+                  key: const ValueKey('mask-remove'),
+                  icon: CupertinoIcons.trash,
+                  label: 'Remove this shape',
+                  color: colors.destructive,
+                  onPressed: () => c.removeComponent(mask.id, i),
+                ),
+            ],
+          ),
         ),
-        if (full) ...[
-          const SizedBox(height: 6),
-          const PanelNote('4 shapes is the most for one mask.'),
-        ],
+        const SizedBox(height: 4),
+        _controls(context, i, comp.shape),
       ],
     );
   }
@@ -502,7 +660,27 @@ class _ShapesTab extends StatelessWidget {
     );
   }
 
-  List<Widget> _controls(BuildContext context, int i, MaskShape s) {
+  DevelopSlider _brush(
+    String key,
+    String label,
+    double value,
+    double min,
+    double reset,
+    void Function(double v) set,
+  ) => DevelopSlider(
+    key: ValueKey('mask-brush-$key'),
+    label: label,
+    value: value,
+    min: min,
+    max: key == 'size' ? 50 : 100,
+    format: (v) => '${v.round()}',
+    onStart: () {},
+    onChanged: (v) => set(v.roundToDouble()),
+    onEnd: () {},
+    onReset: () => set(reset),
+  );
+
+  Widget _controls(BuildContext context, int i, MaskShape s) {
     final c = controller;
     final colors = AppColors.of(context);
     switch (s) {
@@ -516,94 +694,70 @@ class _ShapesTab extends StatelessWidget {
           feather: feather ?? s.feather,
           invert: invert ?? s.invert,
         );
-        return [
-          _number(
-            i,
-            'feather',
-            'Feather',
-            s.feather,
-            50,
-            (v) => radial(feather: v),
-          ),
-          SizedBox(
-            height: 44,
-            child: Row(
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _number(
+                i,
+                'feather',
+                'Feather',
+                s.feather,
+                50,
+                (v) => radial(feather: v),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Expanded(
-                  child: Text(
-                    'Invert',
-                    style: AppText.subhead.copyWith(color: colors.text),
-                  ),
+                Text(
+                  'Invert',
+                  style: AppText.subhead.copyWith(color: colors.text),
                 ),
-                CupertinoSwitch(
-                  key: ValueKey('mask-invert-$i'),
-                  value: s.invert,
-                  activeTrackColor: colors.accent,
-                  onChanged: (v) =>
-                      c.updateShape(mask.id, i, radial(invert: v)),
+                SizedBox(
+                  height: 36,
+                  child: CupertinoSwitch(
+                    key: ValueKey('mask-invert-$i'),
+                    value: s.invert,
+                    activeTrackColor: colors.accent,
+                    onChanged: (v) =>
+                        c.updateShape(mask.id, i, radial(invert: v)),
+                  ),
                 ),
               ],
             ),
-          ),
-        ];
+          ],
+        );
       case LinearShape():
-        return const [PanelNote('Drag the lines on the photo to move it.')];
+        return const PanelNote('Drag the lines on the photo to move it.');
       case BrushShape():
-        return [
-          ChipWrap(
-            children: [
-              PanelChip(
-                label: 'Brush',
-                on: !c.brushErase,
-                onTap: () => c.setBrush(erase: false),
-              ),
-              PanelChip(
-                label: 'Erase',
-                on: c.brushErase,
-                onTap: () => c.setBrush(erase: true),
-              ),
-            ],
+        return _Triple(
+          _brush(
+            'size',
+            'Size',
+            c.brushSize * 100,
+            1,
+            5,
+            (v) => c.setBrush(size: v / 100),
           ),
-          const SizedBox(height: 6),
-          DevelopSlider(
-            key: const ValueKey('mask-brush-size'),
-            label: 'Size',
-            value: c.brushSize * 100,
-            min: 1,
-            max: 50,
-            format: (v) => '${v.round()}',
-            onStart: () {},
-            onChanged: (v) => c.setBrush(size: v.roundToDouble() / 100),
-            onEnd: () {},
-            onReset: () => c.setBrush(size: 0.05),
+          _brush(
+            'feather',
+            'Feather',
+            c.brushFeather,
+            0,
+            50,
+            (v) => c.setBrush(feather: v),
           ),
-          SliderPair(
-            left: DevelopSlider(
-              key: const ValueKey('mask-brush-feather'),
-              label: 'Feather',
-              value: c.brushFeather,
-              min: 0,
-              max: 100,
-              format: (v) => '${v.round()}',
-              onStart: () {},
-              onChanged: (v) => c.setBrush(feather: v.roundToDouble()),
-              onEnd: () {},
-              onReset: () => c.setBrush(feather: 50),
-            ),
-            right: DevelopSlider(
-              key: const ValueKey('mask-brush-flow'),
-              label: 'Flow',
-              value: c.brushFlow,
-              min: 0,
-              max: 100,
-              format: (v) => '${v.round()}',
-              onStart: () {},
-              onChanged: (v) => c.setBrush(flow: v.roundToDouble()),
-              onEnd: () {},
-              onReset: () => c.setBrush(flow: 100),
-            ),
+          _brush(
+            'flow',
+            'Flow',
+            c.brushFlow,
+            0,
+            100,
+            (v) => c.setBrush(flow: v),
           ),
-        ];
+        );
       case LuminanceRangeShape():
         LuminanceRangeShape range({
           double? low,
@@ -614,51 +768,28 @@ class _ShapesTab extends StatelessWidget {
           high: high ?? s.high,
           smooth: smooth ?? s.smooth,
         );
-        return [
-          SliderPair(
-            left: _number(
-              i,
-              'low',
-              'Low',
-              s.low * 100,
-              50,
-              (v) => range(low: (v / 100).clamp(0.0, s.high)),
-            ),
-            right: _number(
-              i,
-              'high',
-              'High',
-              s.high * 100,
-              100,
-              (v) => range(high: (v / 100).clamp(s.low, 1.0)),
-            ),
+        return _Triple(
+          _number(
+            i,
+            'low',
+            'Low',
+            s.low * 100,
+            50,
+            (v) => range(low: (v / 100).clamp(0.0, s.high)),
+          ),
+          _number(
+            i,
+            'high',
+            'High',
+            s.high * 100,
+            100,
+            (v) => range(high: (v / 100).clamp(s.low, 1.0)),
           ),
           _number(i, 'smooth', 'Smooth', s.smooth, 20, (v) => range(smooth: v)),
-        ];
+        );
       case ColourRangeShape():
-        return [
-          if (s.samples.isEmpty)
-            const PanelNote('Tap the photo to pick a colour.')
-          else
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Row(
-                children: [
-                  for (final (r, g, b) in s.samples)
-                    Container(
-                      width: 20,
-                      height: 20,
-                      margin: const EdgeInsets.only(right: 8),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Color.from(alpha: 1, red: r, green: g, blue: b),
-                        border: Border.all(color: colors.separator),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          _number(
+        return SliderPair(
+          left: _number(
             i,
             'refine',
             'Refine',
@@ -666,68 +797,62 @@ class _ShapesTab extends StatelessWidget {
             50,
             (v) => ColourRangeShape(s.samples, refine: v),
           ),
-        ];
+          right: s.samples.isEmpty
+              ? const PanelNote('Tap the photo to pick a colour.')
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Colours',
+                      style: AppText.subhead.copyWith(color: colors.text),
+                    ),
+                    SizedBox(
+                      height: 36,
+                      child: Row(
+                        children: [
+                          for (final (r, g, b) in s.samples)
+                            Container(
+                              width: 18,
+                              height: 18,
+                              margin: const EdgeInsets.only(right: 6),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Color.from(
+                                  alpha: 1,
+                                  red: r,
+                                  green: g,
+                                  blue: b,
+                                ),
+                                border: Border.all(color: colors.separator),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+        );
       case SubjectShape() || SkyShape() || BackgroundShape():
-        return const [
-          PanelNote('Found automatically. Brush or subtract to fix it.'),
-        ];
+        return const PanelNote(
+          'Found automatically. Brush or subtract to fix it.',
+        );
     }
   }
 }
 
-class _ComponentHeader extends StatelessWidget {
-  const _ComponentHeader({
-    required this.controller,
-    required this.mask,
-    required this.index,
-    required this.removable,
-  });
-
-  final PhotoEditorController controller;
-  final Mask mask;
-  final int index;
-  final bool removable;
+/// Three sliders side by side.
+class _Triple extends StatelessWidget {
+  const _Triple(this.a, this.b, this.c);
+  final Widget a, b, c;
 
   @override
-  Widget build(BuildContext context) {
-    final colors = AppColors.of(context);
-    final comp = mask.components[index];
-    return SizedBox(
-      height: 44,
-      child: Row(
-        children: [
-          _Badge(comp.shape, size: 22),
-          const SizedBox(width: 10),
-          Flexible(
-            child: Text(
-              maskShapeName(comp.shape),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: AppText.headline.copyWith(
-                color: colors.text,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          if (index > 0) ...[
-            const SizedBox(width: 8),
-            Text(
-              _opName(comp.op),
-              style: AppText.caption.copyWith(color: colors.secondary),
-            ),
-          ],
-          const Spacer(),
-          if (removable)
-            AppIconButton(
-              key: ValueKey('mask-remove-$index'),
-              icon: CupertinoIcons.xmark_circle_fill,
-              label: 'Remove this shape',
-              iconSize: 20,
-              color: colors.secondary,
-              onPressed: () => controller.removeComponent(mask.id, index),
-            ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Row(
+    children: [
+      Expanded(child: a),
+      const SizedBox(width: 12),
+      Expanded(child: b),
+      const SizedBox(width: 12),
+      Expanded(child: c),
+    ],
+  );
 }

@@ -1,6 +1,10 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pio_photo_layout/core/develop/masks.dart';
+import 'package:pio_photo_layout/core/develop/photo_developer.dart';
 import 'package:pio_photo_layout/core/develop/settings.dart';
 import 'package:pio_photo_layout/features/develop/panels/develop_slider.dart';
 import 'package:pio_photo_layout/features/develop/panels/panel_masks.dart';
@@ -10,7 +14,7 @@ import 'package:pio_photo_layout/ui/widgets/action_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../editor/editor_screen_test.dart' show etest;
-import 'panels_test.dart' show dragTo, open, openTab, sliderOf;
+import 'panels_test.dart' show dragTo, open, openTab, overflow, sliderOf;
 import 'photo_editor_test.dart' show editorOn, homeWith, pumpEditor, settle;
 
 List<Mask> masksOf(PhotoEditorController e) => e.settings.masks;
@@ -126,7 +130,7 @@ void main() {
       expect(m.components.single.shape, RadialShape());
       expect(m.components.single.op, MaskOp.add);
       expect(e.selectedMaskId, m.id);
-      expect(find.text('Adjust'), findsOneWidget);
+      expect(find.text('Light'), findsOneWidget, reason: 'the first tab');
       expect(find.text('Mask 1'), findsOneWidget);
       expect(e.hasOwnChanges, isTrue, reason: 'masks live in the overrides');
 
@@ -161,13 +165,19 @@ void main() {
       expect(e.canUndo, isFalse, reason: 'the add and the drag were one each');
     });
 
-    etest('every local slider is in the Adjust tab', (tester) async {
+    etest('every local slider is in a tab', (tester) async {
       final e = await open(tester, ToolPanel.masks);
       await run(tester, () => e.addMask(RadialShape()));
-      for (final s in kLocalSettings) {
-        expect(find.byKey(ValueKey('slider-${s.name}')), findsOneWidget);
+      final seen = <Setting>{};
+      for (final t in kAdjustTabs.entries) {
+        await openTab(tester, t.key);
+        for (final s in t.value) {
+          expect(find.byKey(ValueKey('slider-${s.name}')), findsOneWidget);
+        }
+        seen.addAll(t.value);
       }
-      await reveal(tester, sliderOf(Setting.saturation));
+      expect(seen, kLocalSettings);
+      await openTab(tester, 'Colour');
       await dragTo(tester, sliderOf(Setting.saturation), 0.25);
       expect(maskOf(e).adjust[Setting.saturation], lessThan(-10));
     });
@@ -200,6 +210,29 @@ void main() {
       expect(maskOf(e).name, 'Mask 1');
     });
 
+    etest('names are at most 40 characters; a blank one is ignored', (
+      tester,
+    ) async {
+      final e = await open(tester, ToolPanel.masks);
+      await run(tester, () => e.addMask(RadialShape()));
+      final id = e.selectedMaskId!;
+      await openMaskMenu(tester, 'Rename');
+      expect(
+        tester
+            .widget<CupertinoTextField>(find.byType(CupertinoTextField))
+            .maxLength,
+        kMaxMaskName,
+      );
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      await run(tester, () => e.renameMask(id, 'A' * 45));
+      expect(maskOf(e).name, 'A' * 40);
+      await run(tester, () => e.renameMask(id, '   '));
+      expect(maskOf(e).name, 'A' * 40);
+      await run(tester, e.undo);
+      expect(maskOf(e).name, 'Mask 1', reason: 'the blank name added no step');
+    });
+
     etest('delete works and undoes', (tester) async {
       final e = await open(tester, ToolPanel.masks);
       await run(tester, () => e.addMask(RadialShape()));
@@ -215,6 +248,20 @@ void main() {
       );
       await run(tester, e.undo);
       expect(maskOf(e).name, 'Mask 1');
+    });
+
+    etest('undoing a delete brings back the same mask', (tester) async {
+      final e = await open(tester, ToolPanel.masks);
+      await run(tester, () async {
+        await e.addMask(RadialShape());
+        await e.setMaskValue(e.selectedMaskId!, Setting.exposure, 1);
+      });
+      final before = maskOf(e);
+      await run(tester, () => e.deleteMask(before.id));
+      expect(masksOf(e), isEmpty);
+      await run(tester, e.undo);
+      expect(maskOf(e).id, before.id);
+      expect(maskOf(e), before);
     });
 
     etest('the ninth mask is refused', (tester) async {
@@ -240,8 +287,7 @@ void main() {
       final e = await open(tester, ToolPanel.masks);
       await run(tester, () => e.addMask(RadialShape()));
       await openTab(tester, 'Mask');
-      await reveal(tester, find.text('Subtract'));
-      await tester.tap(find.text('Subtract'));
+      await tester.tap(find.byKey(const ValueKey('mask-op-subtract')));
       await tester.pumpAndSettle();
       await tester.tap(
         find.descendant(
@@ -255,12 +301,19 @@ void main() {
       expect(comps.length, 2);
       expect(comps[1].op, MaskOp.subtract);
       expect(comps[1].shape, LuminanceRangeShape());
+      expect(e.selectedComponent, 1, reason: 'the new shape is shown');
       expect(find.text('Low'), findsOneWidget);
+      await tester.tap(find.text('Shape 1'));
+      await tester.pump();
+      expect(find.text('Feather'), findsOneWidget);
+      expect(find.text('Low'), findsNothing, reason: 'one shape at a time');
+      await tester.tap(find.text('Shape 2'));
+      await tester.pump();
 
-      await reveal(tester, find.byKey(const ValueKey('mask-remove-1')));
-      await tester.tap(find.byKey(const ValueKey('mask-remove-1')));
+      await tester.tap(find.byKey(const ValueKey('mask-remove')));
       await settle(tester);
-      expect(maskOf(e).components.length, 1);
+      expect(maskOf(e).components.single.shape, RadialShape());
+      expect(e.selectedComponent, 0);
       await run(tester, e.undo);
       expect(maskOf(e).components.length, 2);
     });
@@ -294,7 +347,16 @@ void main() {
       await tester.tap(find.text('Show mask'));
       await tester.pump();
       expect(e.showOverlay, isTrue);
-      expect(e.canUndo, isTrue);
+      await tester.tap(find.text('Show mask'));
+      await tester.pump();
+      expect(e.showOverlay, isFalse);
+      await tester.tap(find.text('Show mask'));
+      await tester.pump();
+      await run(tester, e.undo);
+      expect(masksOf(e), isEmpty);
+      expect(e.canUndo, isFalse, reason: 'Show mask adds no undo step');
+      expect(e.showOverlay, isTrue);
+      await run(tester, () => e.addMask(const SubjectShape()));
       await openTab(tester, 'Mask');
       expect(
         find.text('Found automatically. Brush or subtract to fix it.'),
@@ -315,7 +377,6 @@ void main() {
         of: find.byKey(const ValueKey('mask-brush-flow')),
         matching: find.byType(CupertinoSlider),
       );
-      await reveal(tester, flow);
       await dragTo(tester, flow, 0.5);
       expect(e.brushFlow, lessThan(90));
       expect(
@@ -323,6 +384,81 @@ void main() {
         BrushShape(const []),
         reason: 'brush settings are not part of the look',
       );
+    });
+  });
+
+  group('every control is in view', () {
+    for (final size in const [Size(390, 844), Size(320, 568)]) {
+      final w = size.width.toInt();
+      etest('adjust tabs at $w', (tester) async {
+        final e = await open(tester, ToolPanel.masks, size: size);
+        await run(tester, () => e.addMask(RadialShape()));
+        for (final t in kAdjustTabs.keys) {
+          await openTab(tester, t);
+          expect(overflow(tester), 0, reason: t);
+        }
+      });
+      etest('each shape, alone and four of a kind, at $w', (tester) async {
+        final e = await open(tester, ToolPanel.masks, size: size);
+        for (final k in kMaskKinds.entries) {
+          await run(tester, () => e.addMask(k.value()));
+          if (k.key == 'Subject') await openTab(tester, 'Mask');
+          expect(overflow(tester), 0, reason: '${k.key} alone');
+          await run(tester, () async {
+            final id = e.selectedMaskId!;
+            await e.addComponent(id, k.value(), MaskOp.add);
+            await e.addComponent(id, k.value(), MaskOp.subtract);
+            await e.addComponent(id, k.value(), MaskOp.intersect);
+          });
+          for (final i in [3, 1]) {
+            e.selectComponent(i);
+            await tester.pump();
+            expect(overflow(tester), 0, reason: '${k.key} shape ${i + 1}');
+          }
+        }
+      });
+    }
+  });
+
+  group('developed photo', () {
+    etest('a hidden mask leaves the photo as it was', (tester) async {
+      final out = await tester.runAsync(() async {
+        final rec = ui.PictureRecorder();
+        final canvas = ui.Canvas(rec);
+        for (var x = 0; x < 64; x += 8) {
+          canvas.drawRect(
+            ui.Rect.fromLTWH(x.toDouble(), 0, 8, 64),
+            ui.Paint()..color = ui.Color.fromARGB(255, 40 + x, 90, 160 - x),
+          );
+        }
+        final src = await rec.endRecording().toImage(64, 64);
+        Mask mask({required bool visible}) => Mask(
+          id: 'm1',
+          name: 'Mask 1',
+          components: [MaskComponent(RadialShape())],
+          adjust: const {Setting.exposure: 1.5},
+          visible: visible,
+        );
+        Future<Uint8List> dev(List<Mask> masks) async {
+          final img = await CpuDeveloper().develop(
+            src,
+            EditSettings.resolve([SettingsPatch(masks: masks)]),
+          );
+          final bd = await img.toByteData(
+            format: ui.ImageByteFormat.rawStraightRgba,
+          );
+          return bd!.buffer.asUint8List();
+        }
+
+        return [
+          await dev(const []),
+          await dev([mask(visible: false)]),
+          await dev([mask(visible: true)]),
+        ];
+      });
+      final [none, hidden, shown] = out!;
+      expect(hidden, none);
+      expect(shown, isNot(none), reason: 'the shown mask brightens the middle');
     });
   });
 
@@ -416,6 +552,7 @@ void main() {
       etest('mask adjust${c.key}', (tester) async {
         final e = await scene(tester, size: size, b: b);
         e.selectMask(masksOf(e).first.id);
+        e.setShowOverlay(true);
         await tester.pump();
         await expectLater(
           panel(),
